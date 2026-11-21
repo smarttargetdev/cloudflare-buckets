@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { formatBytes, type ParsedClientError } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
+import { useLocale } from '../shared/LocaleContext';
 import type {
   LogSinkId,
   PerformanceMetricsSnapshot,
@@ -11,6 +13,7 @@ import { ErrorBanner } from './ErrorBanner';
 import { TelemetryDashboard } from './TelemetryDashboard';
 
 export function TelemetryView() {
+  const { locale, t } = useLocale();
   const [metrics, setMetrics] = useState<PerformanceMetricsSnapshot | null>(null);
   const [logs, setLogs] = useState<StructuredLogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState('ALL');
@@ -72,42 +75,42 @@ export function TelemetryView() {
       {/* 4-Column Metrics KPI Strip */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Requisições API &amp; R2</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{t.telemetry.kpiRequests}</div>
           <div className="mt-1 text-2xl font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-100">
             {metrics?.totalRequests ?? 0}
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            Uptime {metrics?.uptimeSeconds ?? 0}s
+            {formatTemplate(t.telemetry.kpiUptime, { seconds: metrics?.uptimeSeconds ?? 0 })}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Latência Média / P95</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{t.telemetry.kpiLatency}</div>
           <div className="mt-1 text-2xl font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-100">
             {metrics?.overallAvgMs ?? 0} ms / {metrics?.overallP95Ms ?? 0} ms
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
-            {metrics?.recentWorkerTimingHeader ?? 'Server-Timing ativo'}
+            {metrics?.recentWorkerTimingHeader ?? t.telemetry.kpiServerTimingActive}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Throughput Transferido</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{t.telemetry.kpiThroughput}</div>
           <div className="mt-1 text-2xl font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-100">
             {formatBytes(metrics?.totalBytesTransferred ?? 0)}
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            S3 PutObject + GetObject + List
+            {t.telemetry.kpiThroughputSub}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Taxa de Erros</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{t.telemetry.kpiErrorRate}</div>
           <div className="mt-1 text-2xl font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-100">
             {metrics?.errorRatePercent ?? 0}%
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            {metrics?.totalErrors ?? 0} falha(s) RFC 7807
+            {formatTemplate(t.telemetry.kpiErrorsSub, { count: metrics?.totalErrors ?? 0 })}
           </div>
         </div>
       </section>
@@ -120,10 +123,10 @@ export function TelemetryView() {
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Pipeline de Logging Centralizado (.NET 10 Serilog + Cloudflare Tail Worker)
+              {t.telemetry.sinksTitle}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Ative ou configure os destinos de agregação de logs estruturados e telemetria de borda
+              {t.telemetry.sinksSubtitle}
             </p>
           </div>
           <button
@@ -132,7 +135,7 @@ export function TelemetryView() {
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Atualizar Telemetria
+            {t.telemetry.refreshTelemetry}
           </button>
         </div>
 
@@ -155,7 +158,7 @@ export function TelemetryView() {
                     onChange={(e) => handleToggleSink(sink.id, 'enabled', e.target.checked)}
                     className="accent-orange-600"
                   />
-                  Sink API .NET Ativo
+                  {t.telemetry.sinkActiveLabel}
                 </label>
                 {sink.id !== 'RollingFile' && (
                   <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 cursor-pointer">
@@ -167,7 +170,7 @@ export function TelemetryView() {
                       }
                       className="accent-orange-600"
                     />
-                    Tail Worker R2
+                    {t.telemetry.tailWorkerLabel}
                   </label>
                 )}
               </div>
@@ -180,20 +183,20 @@ export function TelemetryView() {
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Métricas de Desempenho por Operação R2
+            {t.telemetry.opsTitle}
           </h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400">
-                <th className="py-2.5 px-4">Operação SDK / API</th>
-                <th className="py-2.5 px-3 text-right">Chamadas</th>
-                <th className="py-2.5 px-3 text-right">Erros</th>
-                <th className="py-2.5 px-3 text-right">Média (ms)</th>
+                <th className="py-2.5 px-4">{t.telemetry.colOperation}</th>
+                <th className="py-2.5 px-3 text-right">{t.telemetry.colCalls}</th>
+                <th className="py-2.5 px-3 text-right">{t.telemetry.colErrors}</th>
+                <th className="py-2.5 px-3 text-right">{t.telemetry.colAvgMs}</th>
                 <th className="py-2.5 px-3 text-right">P50 (ms)</th>
                 <th className="py-2.5 px-3 text-right">P95 (ms)</th>
-                <th className="py-2.5 px-4 text-right">Volume</th>
+                <th className="py-2.5 px-4 text-right">{t.telemetry.colVolume}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-mono tabular-nums">
@@ -229,7 +232,7 @@ export function TelemetryView() {
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Stream de Logs Estruturados (TraceId &amp; Sinks)
+            {t.telemetry.logsTitle}
           </h3>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -237,7 +240,7 @@ export function TelemetryView() {
               onChange={(e) => setLevelFilter(e.target.value)}
               className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             >
-              <option value="ALL">Todos os níveis</option>
+              <option value="ALL">{t.telemetry.allLevels}</option>
               <option value="Information">Information</option>
               <option value="Warning">Warning</option>
               <option value="Error">Error</option>
@@ -246,7 +249,7 @@ export function TelemetryView() {
               type="text"
               value={searchLog}
               onChange={(e) => setSearchLog(e.target.value)}
-              placeholder="Filtrar TraceId, bucket ou mensagem..."
+              placeholder={t.telemetry.filterPlaceholder}
               className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
             <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
@@ -271,16 +274,16 @@ export function TelemetryView() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap"
             >
               <Download className="h-3.5 w-3.5" />
-              Download Logs
+              {t.telemetry.downloadLogs}
             </button>
           </div>
         </div>
 
         <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
           {loading ? (
-            <div className="p-6 text-center text-xs text-slate-500">Carregando logs...</div>
+            <div className="p-6 text-center text-xs text-slate-500">{t.telemetry.loadingLogs}</div>
           ) : logs.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500">Nenhum evento encontrado para este filtro.</div>
+            <div className="p-6 text-center text-xs text-slate-500">{t.telemetry.emptyLogs}</div>
           ) : (
             logs.map((log) => (
               <div key={log.id} className="px-5 py-3 text-xs space-y-1">
@@ -305,7 +308,7 @@ export function TelemetryView() {
                     <span className="text-slate-500 dark:text-slate-400">Trace {log.traceId}</span>
                   </div>
                   <div className="text-slate-500 dark:text-slate-400 tabular-nums">
-                    HTTP {log.statusCode} · {log.durationMs} ms · {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
+                    HTTP {log.statusCode} · {log.durationMs} ms · {new Date(log.timestamp).toLocaleTimeString(locale)}
                   </div>
                 </div>
                 <div className="text-slate-700 dark:text-slate-300">{log.message}</div>

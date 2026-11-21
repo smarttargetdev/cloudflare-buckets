@@ -356,11 +356,52 @@ export class R2StorageEngine {
     bucketName: string,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
-  ): Promise<void> {
+    options?: { force?: boolean },
+  ): Promise<{ deletedCount: number }> {
+    const force = Boolean(options?.force);
+
     if (mode === 'cloudflare' && creds) {
       const s3 = this.createS3Client(creds);
+      let deletedCount = 0;
+
+      if (force) {
+        let continuationToken: string | undefined;
+        do {
+          const listed = await s3.send(
+            new ListObjectsV2Command({
+              Bucket: bucketName,
+              ContinuationToken: continuationToken,
+              MaxKeys: 1000,
+            }),
+          );
+          const keys = (listed.Contents ?? [])
+            .map((o) => o.Key)
+            .filter((k): k is string => Boolean(k));
+          if (keys.length > 0) {
+            await s3.send(
+              new DeleteObjectsCommand({
+                Bucket: bucketName,
+                Delete: { Objects: keys.map((Key) => ({ Key })) },
+              }),
+            );
+            deletedCount += keys.length;
+          }
+          continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+        } while (continuationToken);
+      } else {
+        const probe = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1 }));
+        if ((probe.Contents?.length ?? 0) > 0) {
+          throw new AppApiError({
+            status: 409,
+            errorCode: 'BUCKET_NOT_EMPTY',
+            title: 'Bucket Not Empty',
+            detail: `Bucket "${bucketName}" is not empty. Confirm its name to delete the bucket and all contents.`,
+          });
+        }
+      }
+
       await s3.send(new DeleteBucketCommand({ Bucket: bucketName }));
-      return;
+      return { deletedCount };
     }
 
     const bucket = this.sandboxBuckets.get(bucketName);
@@ -373,16 +414,103 @@ export class R2StorageEngine {
       });
     }
 
-    if (bucket.objects.size > 0) {
+    const existingCount = bucket.objects.size;
+    if (existingCount > 0 && !force) {
       throw new AppApiError({
         status: 409,
         errorCode: 'BUCKET_NOT_EMPTY',
         title: 'Bucket Not Empty',
-        detail: `Bucket "${bucketName}" still contains ${bucket.objects.size} objects or folder markers. Delete its contents first.`,
+        detail: `Bucket "${bucketName}" still contains ${existingCount} objects or folder markers. Confirm its name to delete all contents.`,
       });
     }
 
+    bucket.objects.clear();
     this.sandboxBuckets.delete(bucketName);
+    return { deletedCount: existingCount };
+  }
+
+  public async deleteFolder(
+    bucketName: string,
+    rawPrefix: string,
+    mode: ConnectionMode,
+    creds?: CloudflareCredentials,
+    options?: { recursive?: boolean },
+  ): Promise<{ prefix: string; deletedCount: number }> {
+    const folderPrefix = validateFolderPrefix(rawPrefix);
+    const recursive = Boolean(options?.recursive);
+
+    if (mode === 'cloudflare' && creds) {
+      const s3 = this.createS3Client(creds);
+      const keysToDelete: string[] = [];
+      let continuationToken: string | undefined;
+
+      do {
+        const listed = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: bucketName,
+            Prefix: folderPrefix,
+            ContinuationToken: continuationToken,
+            MaxKeys: 1000,
+          }),
+        );
+        for (const obj of listed.Contents ?? []) {
+          if (obj.Key) keysToDelete.push(obj.Key);
+        }
+        continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      } while (continuationToken);
+
+      const hasNestedContent = keysToDelete.some((k) => k !== folderPrefix);
+      if (hasNestedContent && !recursive) {
+        throw new AppApiError({
+          status: 409,
+          errorCode: 'FOLDER_NOT_EMPTY',
+          title: 'Folder Not Empty',
+          detail: `Folder "${folderPrefix}" is not empty. Confirm its path to delete the folder and all nested contents.`,
+        });
+      }
+
+      if (keysToDelete.length > 0) {
+        for (let i = 0; i < keysToDelete.length; i += 1000) {
+          const chunk = keysToDelete.slice(i, i + 1000);
+          await s3.send(
+            new DeleteObjectsCommand({
+              Bucket: bucketName,
+              Delete: { Objects: chunk.map((Key) => ({ Key })) },
+            }),
+          );
+        }
+      }
+
+      return { prefix: folderPrefix, deletedCount: keysToDelete.length };
+    }
+
+    const bucket = this.sandboxBuckets.get(bucketName);
+    if (!bucket) {
+      throw new AppApiError({
+        status: 404,
+        errorCode: 'BUCKET_NOT_FOUND',
+        title: 'Bucket Not Found',
+        detail: `Bucket "${bucketName}" was not found.`,
+      });
+    }
+
+    const matchingKeys = Array.from(bucket.objects.keys()).filter((k) => k.startsWith(folderPrefix));
+    const hasNestedContent = matchingKeys.some((k) => k !== folderPrefix);
+
+    if (hasNestedContent && !recursive) {
+      throw new AppApiError({
+        status: 409,
+        errorCode: 'FOLDER_NOT_EMPTY',
+        title: 'Folder Not Empty',
+        detail: `Folder "${folderPrefix}" contains ${matchingKeys.filter((k) => k !== folderPrefix).length} nested item(s). Confirm its path to delete all contents.`,
+      });
+    }
+
+    for (const key of matchingKeys) {
+      bucket.objects.delete(key);
+    }
+
+    return { prefix: folderPrefix, deletedCount: matchingKeys.length };
   }
 
   public async listDirectory(

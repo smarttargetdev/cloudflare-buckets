@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, Folder, Laptop, Monitor, Search, Smartphone, Tablet, Trash2 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { buildBreadcrumbs, formatBytes, type ParsedClientError } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
+import { useLocale } from '../shared/LocaleContext';
 import type { BucketSummary, DirectoryListing } from '../shared/types';
 import { ErrorBanner } from './ErrorBanner';
 
@@ -19,6 +21,7 @@ const PLATFORM_META: Record<
 };
 
 export function ExpoSimulatorView() {
+  const { t } = useLocale();
   const [platform, setPlatform] = useState<ExpoPlatform>('android');
   const [buckets, setBuckets] = useState<BucketSummary[]>([]);
   const [bucket, setBucket] = useState('buckets-prod-assets');
@@ -82,10 +85,10 @@ export function ExpoSimulatorView() {
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Simulador Expo Universal TypeScript
+            {t.expo.title}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {meta.runtime} · Conectado ao vivo à API REST de Buckets
+            {meta.runtime} · {t.expo.subtitleSuffix}
           </p>
         </div>
 
@@ -153,7 +156,7 @@ export function ExpoSimulatorView() {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Filtrar arquivos..."
+                  placeholder={t.expo.filterPlaceholder}
                   className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                 />
               </div>
@@ -185,7 +188,7 @@ export function ExpoSimulatorView() {
             {selectedKeys.size > 0 && (
               <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-xs">
                 <span className="font-medium text-red-800 dark:text-red-200">
-                  {selectedKeys.size} selecionado(s)
+                  {formatTemplate(t.expo.selectedCount, { count: selectedKeys.size })}
                 </span>
                 <button
                   type="button"
@@ -193,7 +196,7 @@ export function ExpoSimulatorView() {
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-red-600 text-white font-medium"
                 >
                   <Trash2 className="h-3 w-3" />
-                  Excluir
+                  {t.expo.deleteAction}
                 </button>
               </div>
             )}
@@ -238,7 +241,7 @@ export function ExpoSimulatorView() {
 
               {(listing?.folders.length ?? 0) === 0 && filteredObjects.length === 0 && (
                 <div className="p-6 text-center text-xs text-slate-500">
-                  Diretório vazio nesta visualização.
+                  {t.expo.emptyDirectory}
                 </div>
               )}
             </div>

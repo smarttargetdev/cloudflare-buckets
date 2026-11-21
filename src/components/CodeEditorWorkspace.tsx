@@ -18,6 +18,8 @@ import {
   type EditorLanguageId,
 } from '../shared/codeEditorUtils';
 import { formatBytes, type ParsedClientError } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
+import { useLocale } from '../shared/LocaleContext';
 import {
   getPrismTokenClass,
   highlightCodeLinesWithPrism,
@@ -48,6 +50,7 @@ export function CodeEditorWorkspace({
   connectionVersion,
   onSaved,
 }: CodeEditorWorkspaceProps) {
+  const { locale, t } = useLocale();
   const [buckets, setBuckets] = useState<BucketSummary[]>([]);
   const [bucket, setBucket] = useState(target?.bucket ?? 'buckets-prod-assets');
   const [bucketObjects, setBucketObjects] = useState<R2ObjectItem[]>([]);
@@ -58,7 +61,7 @@ export function CodeEditorWorkspace({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle');
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null);
   const [editRevision, setEditRevision] = useState(0);
@@ -73,9 +76,10 @@ export function CodeEditorWorkspace({
   const lastAutoSaveAttemptRef = useRef(0);
 
   const spec = useMemo(() => detectEditorLanguage(fileKey), [fileKey]);
+  const displayLangLabel = spec.languageId === 'plaintext' ? t.editor.plainTextLabel : spec.label;
   const syntaxWarning = useMemo(
-    () => validateSyntaxHint(spec.languageId, content),
-    [spec.languageId, content],
+    () => validateSyntaxHint(spec.languageId, content, locale),
+    [spec.languageId, content, locale],
   );
   const prismLines = useMemo(
     () => highlightCodeLinesWithPrism(spec.languageId, content),
@@ -206,21 +210,21 @@ export function CodeEditorWorkspace({
         }
         lastAutoSaveAttemptRef.current = targetRevision;
 
-        const timeLabel = new Date().toLocaleTimeString([], {
+        const timeLabel = new Date().toLocaleTimeString(locale, {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
         });
 
-        if (isAutoSave) {
-          setAutoSaveStatus('saved');
-          setLastAutoSavedAt(timeLabel);
-          setSavedNotice(`Auto-salvo em ${saved.bucket}/${saved.key} (${formatBytes(saved.size)})`);
-        } else {
-          setAutoSaveStatus('saved');
-          setLastAutoSavedAt(timeLabel);
-          setSavedNotice(`Salvo em ${saved.bucket}/${saved.key} (${formatBytes(saved.size)})`);
-        }
+        setAutoSaveStatus('saved');
+        setLastAutoSavedAt(timeLabel);
+        setSavedNotice(
+          formatTemplate(isAutoSave ? t.editor.autoSavedNotice : t.editor.manualSavedNotice, {
+            bucket: saved.bucket,
+            key: saved.key,
+            size: formatBytes(saved.size),
+          }),
+        );
 
         await loadBucketObjects(bucket);
         if (!isAutoSave) {
@@ -235,7 +239,7 @@ export function CodeEditorWorkspace({
         setSaving(false);
       }
     },
-    [bucket, fileKey, content, spec.mimeType, metadata, loadBucketObjects, onSaved],
+    [bucket, fileKey, content, spec.mimeType, metadata, locale, t, loadBucketObjects, onSaved],
   );
 
   // 3-second idle debounce auto-save to backend
@@ -281,8 +285,8 @@ export function CodeEditorWorkspace({
     } catch (err) {
       setSavedNotice(null);
       setError({
-        title: 'Falha ao Formatar',
-        userMessage: err instanceof Error ? err.message : 'Conteúdo inválido para formatação.',
+        title: t.editor.formatErrorTitle,
+        userMessage: err instanceof Error ? err.message : t.editor.formatErrorFallback,
         errorCode: 'FORMAT_ERROR',
         status: 400,
         validationDetails: [],
@@ -330,13 +334,15 @@ export function CodeEditorWorkspace({
   };
 
   const autoSaveStatusLabel = useMemo(() => {
-    if (!autoSaveEnabled) return 'Auto-save desativado';
-    if (autoSaveStatus === 'saving') return 'Auto-save salvando...';
-    if (autoSaveStatus === 'pending') return 'Auto-save em 3s...';
-    if (autoSaveStatus === 'error') return 'Erro no auto-save';
-    if (autoSaveStatus === 'saved' && lastAutoSavedAt) return `Auto-salvo às ${lastAutoSavedAt}`;
-    return 'Auto-save 3s';
-  }, [autoSaveEnabled, autoSaveStatus, lastAutoSavedAt]);
+    if (!autoSaveEnabled) return t.editor.autoSaveDisabled;
+    if (autoSaveStatus === 'saving') return t.editor.autoSaveSaving;
+    if (autoSaveStatus === 'pending') return t.editor.autoSavePending;
+    if (autoSaveStatus === 'error') return t.editor.autoSaveError;
+    if (autoSaveStatus === 'saved' && lastAutoSavedAt) {
+      return formatTemplate(t.editor.autoSaveSavedAt, { time: lastAutoSavedAt });
+    }
+    return t.editor.autoSaveReady;
+  }, [autoSaveEnabled, autoSaveStatus, lastAutoSavedAt, t]);
 
   return (
     <div className="space-y-4">
@@ -347,10 +353,10 @@ export function CodeEditorWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Editor de Código &amp; Texto R2
+              {t.editor.title}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Crie ou edite arquivos .js, .ts, .jsx, .tsx, .json, .yaml/.yml, .toml, .xml, .htm/.html, .css, .md e .txt diretamente no bucket
+              {t.editor.subtitle}
             </p>
           </div>
 
@@ -358,9 +364,9 @@ export function CodeEditorWorkspace({
             <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
               {(
                 [
-                  ['edit', 'Código'],
-                  ['split', 'Dividido'],
-                  ['preview', 'Visualizar'],
+                  ['edit', t.editor.viewEdit],
+                  ['split', t.editor.viewSplit],
+                  ['preview', t.editor.viewPreview],
                 ] as const
               ).map(([modeId, label]) => (
                 <button
@@ -382,13 +388,14 @@ export function CodeEditorWorkspace({
               type="button"
               onClick={() => setAutoSaveEnabled((prev) => !prev)}
               aria-pressed={autoSaveEnabled}
+              title={autoSaveEnabled ? t.editor.autoSaveOn : t.editor.autoSaveOff}
               className={`px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                 autoSaveEnabled
-                  ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
-                  : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  ? 'border-emerald-500 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                  : 'border-slate-300 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-900 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
-              {autoSaveEnabled ? 'Auto-Save: ON' : 'Auto-Save: OFF'}
+              {t.editor.autoSaveLabel}
             </button>
 
             <button
@@ -397,7 +404,7 @@ export function CodeEditorWorkspace({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Format Code
+              {t.editor.formatCode}
             </button>
 
             <button
@@ -407,7 +414,7 @@ export function CodeEditorWorkspace({
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <Save className="h-3.5 w-3.5" />
-              {saving ? 'Salvando...' : dirty ? 'Salvar no R2*' : 'Salvar no R2'}
+              {saving ? t.editor.saving : dirty ? t.editor.saveDirty : t.editor.saveClean}
             </button>
           </div>
         </div>
@@ -416,7 +423,7 @@ export function CodeEditorWorkspace({
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
           <div className="md:col-span-3">
             <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">
-              Bucket de Destino
+              {t.editor.destBucketLabel}
             </label>
             <select
               value={bucket}
@@ -433,7 +440,7 @@ export function CodeEditorWorkspace({
 
           <div className="md:col-span-5">
             <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">
-              Caminho / Nome do Arquivo
+              {t.editor.filePathLabel}
             </label>
             <input
               type="text"
@@ -442,21 +449,21 @@ export function CodeEditorWorkspace({
                 setFileKey(e.target.value);
                 bumpEditRevision();
               }}
-              placeholder="ex: src/handler.ts, wrangler.toml ou docs/guide.md"
+              placeholder={t.editor.filePathPlaceholder}
               className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
           </div>
 
           <div className="md:col-span-4">
             <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">
-              Abrir Arquivo Existente ({bucketObjects.length})
+              {formatTemplate(t.editor.openExistingLabel, { count: bucketObjects.length })}
             </label>
             <select
               value=""
               onChange={(e) => handleOpenExisting(e.target.value)}
               className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             >
-              <option value="">Selecionar arquivo do bucket...</option>
+              <option value="">{t.editor.selectExistingPlaceholder}</option>
               {bucketObjects.map((o) => (
                 <option key={o.key} value={o.key}>
                   {o.key}
@@ -470,7 +477,7 @@ export function CodeEditorWorkspace({
         <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 mr-1">
             <FilePlus2 className="h-3 w-3" />
-            Novo modelo:
+            {t.editor.newTemplateLabel}
           </span>
           {KNOWN_CODE_EXTENSIONS.map((extItem) => (
             <button
@@ -491,11 +498,10 @@ export function CodeEditorWorkspace({
 
       {/* Main Editor + Preview Surface */}
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
-        {/* Status strip */}
         <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
           <div className="flex flex-wrap items-center gap-2 text-slate-600 dark:text-slate-300">
             <Code2 className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />
-            <span>{spec.label} (Prism.js)</span>
+            <span>{displayLangLabel} (Prism.js)</span>
             <span className="text-slate-400">·</span>
             <span>{spec.mimeType}</span>
             <span className="text-slate-400">·</span>
@@ -519,14 +525,14 @@ export function CodeEditorWorkspace({
               </span>
             )}
             <span>
-              Ln {cursorPos.line}, Col {cursorPos.col} · {prismLines.length} linhas ·{' '}
+              Ln {cursorPos.line}, Col {cursorPos.col} · {prismLines.length} {t.editor.linesUnit} ·{' '}
               {formatBytes(new Blob([content]).size)}
             </span>
           </div>
         </div>
 
         {loading ? (
-          <div className="p-10 text-center text-xs text-slate-500">Carregando conteúdo do R2...</div>
+          <div className="p-10 text-center text-xs text-slate-500">{t.editor.loadingContent}</div>
         ) : (
           <div
             className={`grid ${
@@ -535,7 +541,6 @@ export function CodeEditorWorkspace({
                 : 'grid-cols-1'
             }`}
           >
-            {/* Left: Line-Numbered Monospace Code Editor with Synchronized Prism.js Overlay */}
             {viewMode !== 'preview' && (
               <div className="flex h-[500px] bg-white dark:bg-[#0B1120]">
                 <div
@@ -582,30 +587,29 @@ export function CodeEditorWorkspace({
                     onKeyUp={(e) => updateCursorStats(e.currentTarget)}
                     onKeyDown={handleTextareaKeyDown}
                     onScroll={syncScroll}
-                    aria-label="Editor de código e texto"
+                    aria-label={t.editor.editorAria}
                     className="relative z-10 w-full h-full m-0 p-3 font-mono text-xs leading-6 whitespace-pre tab-2 bg-transparent text-transparent caret-slate-900 dark:caret-slate-100 selection:bg-orange-500/25 selection:text-transparent resize-none focus:outline-none overflow-auto"
                   />
                 </div>
               </div>
             )}
 
-            {/* Right: Live Rendered Preview (Markdown / Sandboxed HTML / Prism.js Syntax View) */}
             {viewMode !== 'edit' && (
               <div className="h-[500px] overflow-auto bg-slate-50/50 dark:bg-slate-950 p-4">
                 <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-3">
                   <Eye className="h-3.5 w-3.5" />
                   <span>
                     {spec.languageId === 'html'
-                      ? 'Visualização HTML (Iframe Sandbox Isolado)'
+                      ? t.editor.previewHtmlSandbox
                       : spec.languageId === 'markdown'
-                        ? 'Visualização Markdown'
-                        : `Prism.js Syntax View (${spec.label})`}
+                        ? t.editor.previewMarkdown
+                        : formatTemplate(t.editor.previewPrism, { label: displayLangLabel })}
                   </span>
                 </div>
 
                 {spec.languageId === 'html' ? (
                   <iframe
-                    title="Visualização HTML"
+                    title={t.editor.previewHtmlSandbox}
                     sandbox=""
                     srcDoc={content}
                     className="w-full h-[430px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white"

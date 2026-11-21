@@ -100,11 +100,29 @@ class BucketsApiClient {
     );
   }
 
-  public deleteBucket(bucket: string): Promise<{ deleted: boolean; bucket: string }> {
+  public deleteBucket(
+    bucket: string,
+    force = false,
+  ): Promise<{ deleted: boolean; bucket: string; deletedCount?: number }> {
+    const qs = force ? '?force=true' : '';
     return this.request(
-      `/api/buckets/${encodeURIComponent(bucket)}`,
+      `/api/buckets/${encodeURIComponent(bucket)}${qs}`,
       { method: 'DELETE' },
       'DeleteBucket',
+    );
+  }
+
+  public deleteFolder(
+    bucket: string,
+    prefix: string,
+    recursive = false,
+  ): Promise<{ deleted: boolean; bucket: string; prefix: string; deletedCount: number }> {
+    const params = new URLSearchParams({ prefix });
+    if (recursive) params.set('recursive', 'true');
+    return this.request(
+      `/api/buckets/${encodeURIComponent(bucket)}/folders?${params.toString()}`,
+      { method: 'DELETE' },
+      'DeleteFolder',
     );
   }
 

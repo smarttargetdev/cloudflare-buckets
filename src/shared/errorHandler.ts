@@ -1,3 +1,4 @@
+import { formatTemplate, getActiveLocale, getTranslation, type AppLocale } from './i18n';
 import type { ApiErrorResponse } from './types';
 
 export interface ParsedClientError {
@@ -10,22 +11,9 @@ export interface ParsedClientError {
   rawDetail?: string;
 }
 
-const ERROR_CODE_MAP: Record<string, string> = {
-  BUCKET_NAME_INVALID: 'O nome do bucket deve ter entre 3 e 63 caracteres minúsculos, números ou hífens.',
-  BUCKET_ALREADY_EXISTS: 'Já existe um bucket com este nome na conta selecionada.',
-  BUCKET_NOT_FOUND: 'O bucket solicitado não foi encontrado.',
-  BUCKET_NOT_EMPTY: 'O bucket precisa estar vazio antes de ser removido.',
-  FOLDER_INVALID_NAME: 'Nome de diretório inválido. Evite caracteres especiais ou caminhos relativos.',
-  OBJECT_NOT_FOUND: 'O arquivo solicitado não foi localizado no bucket.',
-  BULK_PARTIAL_FAILURE: 'Alguns itens não puderam ser processados na operação em lote.',
-  BULK_DESTINATION_CONFLICT: 'Já existe um arquivo com o mesmo nome no destino e a sobrescrita está desativada.',
-  CLOUDFLARE_AUTH_FAILED: 'Falha de autenticação com as credenciais Cloudflare R2 fornecidas.',
-  CLOUDFLARE_ENDPOINT_ERROR: 'Não foi possível comunicar com o endpoint S3 do Cloudflare R2.',
-  UPLOAD_FILE_REQUIRED: 'Selecione ou arraste pelo menos um arquivo para enviar.',
-  NETWORK_UNREACHABLE: 'Falha de conexão com a API. Verifique se o servidor está acessível.',
-};
+export function parseApiError(error: unknown, locale: AppLocale = getActiveLocale()): ParsedClientError {
+  const errText = getTranslation(locale).errors;
 
-export function parseApiError(error: unknown): ParsedClientError {
   if (isApiErrorResponse(error)) {
     const validationDetails = error.validationErrors
       ? Object.entries(error.validationErrors).flatMap(([field, msgs]) =>
@@ -33,10 +21,10 @@ export function parseApiError(error: unknown): ParsedClientError {
         )
       : [];
 
-    const mapped = ERROR_CODE_MAP[error.errorCode];
+    const mapped = errText.codeMap[error.errorCode];
     return {
-      title: error.title || 'Erro na operação',
-      userMessage: mapped ?? error.detail ?? 'Ocorreu um erro inesperado ao processar a solicitação.',
+      title: error.title || errText.operationErrorTitle,
+      userMessage: mapped ?? error.detail ?? errText.unexpectedError,
       errorCode: error.errorCode || `HTTP_${error.status}`,
       status: error.status,
       traceId: error.traceId,
@@ -51,8 +39,10 @@ export function parseApiError(error: unknown): ParsedClientError {
       error.message.includes('NetworkError') ||
       error.message.includes('ECONNREFUSED');
     return {
-      title: isNetwork ? 'Falha de Rede' : 'Erro do Cliente',
-      userMessage: isNetwork ? ERROR_CODE_MAP.NETWORK_UNREACHABLE : error.message,
+      title: isNetwork ? errText.networkFailureTitle : errText.clientErrorTitle,
+      userMessage: isNetwork
+        ? formatTemplate(errText.codeMap.NETWORK_UNREACHABLE, {})
+        : error.message,
       errorCode: isNetwork ? 'NETWORK_UNREACHABLE' : 'CLIENT_RUNTIME_ERROR',
       status: 0,
       validationDetails: [],
@@ -61,8 +51,8 @@ export function parseApiError(error: unknown): ParsedClientError {
   }
 
   return {
-    title: 'Erro Desconhecido',
-    userMessage: 'Não foi possível concluir a operação solicitada.',
+    title: errText.unknownErrorTitle,
+    userMessage: errText.unknownErrorDetail,
     errorCode: 'UNKNOWN_ERROR',
     status: 500,
     validationDetails: [],

@@ -136,12 +136,15 @@ async function startServer() {
     try {
       const { mode, creds } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
+      const force = req.query.force === 'true' || req.body?.force === true;
       await instrument(req, res, 'DeleteBucket', async () => {
-        await engine.deleteBucket(bucketName, mode, creds);
+        const result = await engine.deleteBucket(bucketName, mode, creds, { force });
         return {
-          payload: { deleted: true, bucket: bucketName },
+          payload: { deleted: true, bucket: bucketName, deletedCount: result.deletedCount },
           bucket: bucketName,
-          message: `Deleted bucket "${bucketName}".`,
+          message: force
+            ? `Force-deleted bucket "${bucketName}" and ${result.deletedCount} contained object(s).`
+            : `Deleted empty bucket "${bucketName}".`,
         };
       });
     } catch (err) {
@@ -180,6 +183,26 @@ async function startServer() {
           bucket: bucketName,
           objectKey: folder.prefix,
           message: `Created virtual directory "${folder.prefix}" in "${bucketName}".`,
+        };
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete('/api/buckets/:bucket/folders', async (req, res, next) => {
+    try {
+      const { mode, creds } = extractConnectionContext(req);
+      const bucketName = req.params.bucket;
+      const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : String(req.body?.prefix ?? '');
+      const recursive = req.query.recursive === 'true' || req.body?.recursive === true;
+      await instrument(req, res, 'BulkDelete', async () => {
+        const result = await engine.deleteFolder(bucketName, prefix, mode, creds, { recursive });
+        return {
+          payload: { deleted: true, bucket: bucketName, prefix: result.prefix, deletedCount: result.deletedCount },
+          bucket: bucketName,
+          objectKey: result.prefix,
+          message: `Deleted virtual folder "${result.prefix}" in "${bucketName}" (${result.deletedCount} item(s) removed).`,
         };
       });
     } catch (err) {

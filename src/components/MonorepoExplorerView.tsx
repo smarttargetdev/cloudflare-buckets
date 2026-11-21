@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, Copy, Download, FileCode2 } from 'lucide-react';
 import { exportMonorepoZip, MONOREPO_FILES } from '../monorepo';
+import { useLocale } from '../shared/LocaleContext';
 import type { MonorepoFile } from '../shared/types';
 
 interface MonorepoExplorerViewProps {
@@ -8,6 +9,7 @@ interface MonorepoExplorerViewProps {
 }
 
 export function MonorepoExplorerView({ customWranglerToml }: MonorepoExplorerViewProps) {
+  const { t } = useLocale();
   const [stackFilter, setStackFilter] = useState<'all' | MonorepoFile['stack']>('all');
   const [selectedPath, setSelectedPath] = useState(MONOREPO_FILES[0].path);
   const [copied, setCopied] = useState(false);
@@ -50,10 +52,10 @@ export function MonorepoExplorerView({ customWranglerToml }: MonorepoExplorerVie
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Código-Fonte do Monorepo (.NET 10 · Expo Universal · Wrangler IaC)
+            {t.monorepo.title}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Inspecione todos os arquivos gerados, incluindo Serilog, métricas R2, testes xUnit/Jest e Workers
+            {t.monorepo.subtitle}
           </p>
         </div>
 
@@ -61,10 +63,10 @@ export function MonorepoExplorerView({ customWranglerToml }: MonorepoExplorerVie
           <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
             {(
               [
-                ['all', 'Todos'],
-                ['backend-dotnet10', '.NET 10'],
-                ['frontend-expo', 'Expo TS'],
-                ['infra-wrangler', 'Wrangler'],
+                ['all', t.monorepo.filterAll],
+                ['backend-dotnet10', t.monorepo.filterDotnet],
+                ['frontend-expo', t.monorepo.filterExpo],
+                ['infra-wrangler', t.monorepo.filterWrangler],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -89,7 +91,7 @@ export function MonorepoExplorerView({ customWranglerToml }: MonorepoExplorerVie
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap"
           >
             <Download className="h-3.5 w-3.5" />
-            {downloading ? 'Empacotando...' : 'Baixar Monorepo (.zip)'}
+            {downloading ? t.monorepo.packaging : t.monorepo.downloadZip}
           </button>
         </div>
       </section>
@@ -143,7 +145,7 @@ export function MonorepoExplorerView({ customWranglerToml }: MonorepoExplorerVie
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-300 dark:border-slate-700 rounded-md hover:bg-white dark:hover:bg-slate-800 transition-colors shrink-0"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? 'Copiado' : 'Copiar'}
+              {copied ? t.monorepo.copied : t.monorepo.copy}
             </button>
           </div>
           <pre className="p-5 text-xs font-mono text-slate-800 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-950 overflow-auto max-h-[540px] leading-relaxed">

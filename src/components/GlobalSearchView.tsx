@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Search } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { formatBytes, type ParsedClientError } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
+import { useLocale } from '../shared/LocaleContext';
 import type { BucketSummary, SearchResponse } from '../shared/types';
 import { ErrorBanner } from './ErrorBanner';
 
@@ -16,6 +18,7 @@ export function GlobalSearchView({
   connectionVersion,
   focusSignal = 0,
 }: GlobalSearchViewProps) {
+  const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
   const [buckets, setBuckets] = useState<BucketSummary[]>([]);
   const [query, setQuery] = useState('');
@@ -64,33 +67,37 @@ export function GlobalSearchView({
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5 space-y-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Busca Global por Nome e Metadados
+            {t.search.title}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Pesquise objetos em todos os buckets R2 por nome de arquivo, caminho completo ou tags x-amz-meta-*
+            {t.search.subtitle}
           </p>
         </div>
 
         <form onSubmit={runSearch} className="grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="md:col-span-4">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Nome ou Chave</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              {t.search.nameOrKeyLabel}
+            </label>
             <input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="ex: manifest, wrangler, aab..."
+              placeholder={t.search.nameOrKeyPlaceholder}
               className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
           </div>
           <div className="md:col-span-3">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Bucket</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              {t.search.bucketLabel}
+            </label>
             <select
               value={bucketFilter}
               onChange={(e) => setBucketFilter(e.target.value)}
               className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             >
-              <option value="">Todos os buckets</option>
+              <option value="">{t.search.allBuckets}</option>
               {buckets.map((b) => (
                 <option key={b.name} value={b.name}>
                   {b.name}
@@ -99,22 +106,26 @@ export function GlobalSearchView({
             </select>
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Tag Key</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              {t.search.tagKeyLabel}
+            </label>
             <input
               type="text"
               value={tagKey}
               onChange={(e) => setTagKey(e.target.value)}
-              placeholder="ex: env"
+              placeholder={t.search.tagKeyPlaceholder}
               className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Tag Value</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              {t.search.tagValueLabel}
+            </label>
             <input
               type="text"
               value={tagValue}
               onChange={(e) => setTagValue(e.target.value)}
-              placeholder="ex: production"
+              placeholder={t.search.tagValuePlaceholder}
               className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
           </div>
@@ -125,7 +136,7 @@ export function GlobalSearchView({
               className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors"
             >
               <Search className="h-3.5 w-3.5" />
-              Buscar
+              {t.search.searchButton}
             </button>
           </div>
         </form>
@@ -135,8 +146,12 @@ export function GlobalSearchView({
         <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
           <span className="tabular-nums">
             {response
-              ? `${response.totalMatches} resultado(s) em ${response.bucketsScanned} bucket(s) · ${response.elapsedMs} ms`
-              : 'Pronto para pesquisar'}
+              ? formatTemplate(t.search.summary, {
+                  matches: response.totalMatches,
+                  buckets: response.bucketsScanned,
+                  elapsed: response.elapsedMs,
+                })
+              : t.search.ready}
           </span>
         </div>
 
@@ -144,24 +159,24 @@ export function GlobalSearchView({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400">
-                <th className="py-2.5 px-4">Bucket / Chave Completa</th>
-                <th className="py-2.5 px-3">Metadados</th>
-                <th className="py-2.5 px-3">Correspondência</th>
-                <th className="py-2.5 px-3 text-right">Tamanho</th>
-                <th className="py-2.5 px-4 text-right">Navegar</th>
+                <th className="py-2.5 px-4">{t.search.colBucketKey}</th>
+                <th className="py-2.5 px-3">{t.search.colMetadata}</th>
+                <th className="py-2.5 px-3">{t.search.colMatch}</th>
+                <th className="py-2.5 px-3 text-right">{t.search.colSize}</th>
+                <th className="py-2.5 px-4 text-right">{t.search.colNavigate}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-sm">
               {loading ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-xs text-slate-500">
-                    Consultando endpoint /api/search...
+                    {t.search.loading}
                   </td>
                 </tr>
               ) : !response || response.results.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-10 text-center text-sm text-slate-500">
-                    Nenhum objeto corresponde aos filtros informados.
+                    {t.search.empty}
                   </td>
                 </tr>
               ) : (
@@ -193,7 +208,7 @@ export function GlobalSearchView({
                         className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline"
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
-                        Abrir Pasta
+                        {t.search.openFolder}
                       </button>
                     </td>
                   </tr>

@@ -16,29 +16,25 @@ import { CodeEditorWorkspace, type EditorTarget } from './components/CodeEditorW
 import { ConnectionDrawer } from './components/ConnectionDrawer';
 import { ExpoSimulatorView } from './components/ExpoSimulatorView';
 import { GlobalSearchView } from './components/GlobalSearchView';
+import { LanguageSelector } from './components/LanguageSelector';
 import { MonorepoExplorerView } from './components/MonorepoExplorerView';
 import { TelemetryView } from './components/TelemetryView';
 import { WranglerStudioView } from './components/WranglerStudioView';
 import { apiClient, type ApiConnectionConfig } from './services/apiClient';
+import { LocaleProvider, useLocale } from './shared/LocaleContext';
 
 type ActiveTab = 'buckets' | 'editor' | 'search' | 'telemetry' | 'expo' | 'wrangler' | 'monorepo';
 
-const NAV_ITEMS: Array<{
-  id: ActiveTab;
-  label: string;
-  shortcut: string;
-  icon: typeof Database;
-}> = [
-  { id: 'buckets', label: 'Buckets & Pastas', shortcut: 'Ctrl+B', icon: Database },
-  { id: 'editor', label: 'Editor de Código', shortcut: 'Alt+C', icon: FileCode2 },
-  { id: 'search', label: 'Busca Global', shortcut: 'Ctrl+K', icon: Search },
-  { id: 'telemetry', label: 'Telemetria & Logs', shortcut: 'Alt+T', icon: Activity },
-  { id: 'expo', label: 'Expo Universal', shortcut: 'Alt+E', icon: Smartphone },
-  { id: 'wrangler', label: 'Wrangler IaC', shortcut: 'Alt+W', icon: TerminalSquare },
-  { id: 'monorepo', label: 'Monorepo & Testes', shortcut: 'Alt+M', icon: Code2 },
-];
-
 export default function App() {
+  return (
+    <LocaleProvider>
+      <AppShell />
+    </LocaleProvider>
+  );
+}
+
+function AppShell() {
+  const { t } = useLocale();
   const [darkMode, setDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('buckets');
   const [selectedBucket, setSelectedBucket] = useState('buckets-prod-assets');
@@ -51,6 +47,21 @@ export default function App() {
   );
   const [connectionVersion, setConnectionVersion] = useState(0);
   const [customWranglerToml, setCustomWranglerToml] = useState<string | undefined>(undefined);
+
+  const navItems: Array<{
+    id: ActiveTab;
+    label: string;
+    shortcut: string;
+    icon: typeof Database;
+  }> = [
+    { id: 'buckets', label: t.nav.buckets, shortcut: 'Ctrl+B', icon: Database },
+    { id: 'editor', label: t.nav.editor, shortcut: 'Alt+C', icon: FileCode2 },
+    { id: 'search', label: t.nav.search, shortcut: 'Ctrl+K', icon: Search },
+    { id: 'telemetry', label: t.nav.telemetry, shortcut: 'Alt+T', icon: Activity },
+    { id: 'expo', label: t.nav.expo, shortcut: 'Alt+E', icon: Smartphone },
+    { id: 'wrangler', label: t.nav.wrangler, shortcut: 'Alt+W', icon: TerminalSquare },
+    { id: 'monorepo', label: t.nav.monorepo, shortcut: 'Alt+M', icon: Code2 },
+  ];
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -135,11 +146,11 @@ export default function App() {
           }}
           className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0"
         >
-          Cloudflare Buckets
+          {t.shell.brand}
         </a>
 
         <nav className="hidden lg:flex items-center gap-6 text-xs font-medium text-slate-600 dark:text-slate-300">
-          {NAV_ITEMS.slice(0, 5).map((item) => (
+          {navItems.slice(0, 5).map((item) => (
             <button
               key={item.id}
               type="button"
@@ -156,10 +167,11 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-2.5 shrink-0">
+          <LanguageSelector />
           <button
             type="button"
             onClick={() => setDarkMode((d) => !d)}
-            aria-label={darkMode ? 'Ativar tema claro' : 'Ativar tema escuro'}
+            aria-label={darkMode ? t.shell.lightThemeAria : t.shell.darkThemeAria}
             className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -167,10 +179,19 @@ export default function App() {
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            title={
+              connectionConfig.mode === 'cloudflare'
+                ? t.shell.r2Connected
+                : t.shell.r2Credentials
+            }
+            aria-label={
+              connectionConfig.mode === 'cloudflare'
+                ? t.shell.r2Connected
+                : t.shell.r2Credentials
+            }
+            className="inline-flex items-center justify-center p-2 text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors shrink-0"
           >
-            <KeyRound className="h-3.5 w-3.5" />
-            {connectionConfig.mode === 'cloudflare' ? 'R2 Conectado' : 'Credenciais R2'}
+            <KeyRound className="h-4 w-4" />
           </button>
         </div>
       </header>
@@ -179,7 +200,7 @@ export default function App() {
       <div className="flex-1 flex min-w-0">
         <aside className="hidden md:flex w-64 shrink-0 flex-col justify-between border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-4">
           <div className="space-y-1">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (
@@ -212,15 +233,15 @@ export default function App() {
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-1 text-xs text-slate-500 dark:text-slate-400">
             <div className="font-medium text-slate-700 dark:text-slate-300">
-              Buckets · {connectionConfig.mode === 'cloudflare' ? 'Cloudflare R2' : 'Sandbox Local'}
+              Buckets · {connectionConfig.mode === 'cloudflare' ? t.shell.cloudflareR2 : t.shell.sandboxLocal}
             </div>
-            <div>Ctrl+B Buckets · Ctrl+K Busca · Alt+C Editor</div>
+            <div>{t.shell.shortcutHint}</div>
           </div>
         </aside>
 
         <main className="flex-1 min-w-0 p-4 md:p-6 overflow-y-auto">
           <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <button
                 key={item.id}
                 type="button"

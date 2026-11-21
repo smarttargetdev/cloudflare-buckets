@@ -89,4 +89,36 @@ describe('R2StorageEngine — Buckets, Hierarchical Folders, Search & Bulk Ops',
     assert.equal(delRes.succeededCount, 1);
     assert.equal(delRes.failedCount, 0);
   });
+
+  it('guards non-empty buckets and recursively deletes all contents when force=true', async () => {
+    const engine = new R2StorageEngine();
+    await assert.rejects(
+      () => engine.deleteBucket('buckets-prod-assets', 'sandbox', undefined, { force: false }),
+      (err: unknown) => err instanceof AppApiError && err.status === 409 && err.errorCode === 'BUCKET_NOT_EMPTY',
+    );
+
+    const forceRes = await engine.deleteBucket('buckets-prod-assets', 'sandbox', undefined, { force: true });
+    assert.ok(forceRes.deletedCount >= 4);
+
+    const remaining = await engine.listBuckets('sandbox');
+    assert.ok(!remaining.some((b) => b.name === 'buckets-prod-assets'));
+  });
+
+  it('guards non-empty virtual folders and deletes nested contents recursively when confirmed', async () => {
+    const engine = new R2StorageEngine();
+    await engine.createFolder('buckets-prod-assets', 'empty-dir', true, 'sandbox');
+    const emptyDel = await engine.deleteFolder('buckets-prod-assets', 'empty-dir/', 'sandbox', undefined, { recursive: false });
+    assert.equal(emptyDel.deletedCount, 1);
+
+    await assert.rejects(
+      () => engine.deleteFolder('buckets-prod-assets', 'branding/', 'sandbox', undefined, { recursive: false }),
+      (err: unknown) => err instanceof AppApiError && err.status === 409 && err.errorCode === 'FOLDER_NOT_EMPTY',
+    );
+
+    const recDel = await engine.deleteFolder('buckets-prod-assets', 'branding/', 'sandbox', undefined, { recursive: true });
+    assert.equal(recDel.deletedCount, 3);
+
+    const rootAfter = await engine.listDirectory('buckets-prod-assets', '', 'sandbox');
+    assert.ok(!rootAfter.folders.some((f) => f.prefix === 'branding/'));
+  });
 });

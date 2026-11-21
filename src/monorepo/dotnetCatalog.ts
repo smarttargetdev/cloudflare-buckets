@@ -404,6 +404,8 @@ public interface IR2StorageService
 {
     Task<DirectoryListing> ListDirectoryAsync(string bucket, string? prefix, CancellationToken ct);
     Task<DirectoryEntry> CreateFolderAsync(string bucket, string prefix, bool createMarkerObject, CancellationToken ct);
+    Task<int> DeleteFolderAsync(string bucket, string prefix, bool recursive, CancellationToken ct);
+    Task<int> EmptyBucketAsync(string bucket, CancellationToken ct);
     Task<R2ObjectItem> UploadObjectAsync(string bucket, string key, Stream content, string contentType, IDictionary<string, string> metadata, CancellationToken ct);
     Task<SearchResponse> SearchAsync(SearchRequest request, CancellationToken ct);
     Task<BulkOperationResult> BulkDeleteAsync(BulkDeleteRequest request, CancellationToken ct);
@@ -488,6 +490,50 @@ public sealed class R2StorageService : IR2StorageService
         _metrics.RecordOperation("CreateFolderMarker", bucket, sw.Elapsed.TotalMilliseconds);
         var name = normalized.TrimEnd('/').Split('/').Last();
         return new DirectoryEntry(normalized, name, createMarkerObject);
+    }
+
+    public async Task<int> DeleteFolderAsync(string bucket, string prefix, bool recursive, CancellationToken ct)
+    {
+        var normalized = NormalizePrefix(prefix);
+        if (string.IsNullOrEmpty(normalized) || normalized.Contains(".."))
+            throw new BucketDomainException(400, "FOLDER_INVALID_NAME", "Folder prefix cannot be empty or contain '..'.");
+
+        var sw = Stopwatch.StartNew();
+        var keys = new List<string>();
+        string? token = null;
+        do
+        {
+            var listed = await _s3.ListObjectsV2Async(new ListObjectsV2Request { BucketName = bucket, Prefix = normalized, ContinuationToken = token, MaxKeys = 1000 }, ct);
+            keys.AddRange(listed.S3Objects.Select(o => o.Key));
+            token = (listed.IsTruncated ?? false) ? listed.NextContinuationToken : null;
+        } while (token is not null);
+
+        if (keys.Any(k => k != normalized) && !recursive)
+            throw new BucketDomainException(409, "FOLDER_NOT_EMPTY", $"Folder '{normalized}' is not empty. Pass recursive=true after user confirmation.");
+
+        foreach (var chunk in keys.Chunk(1000))
+        {
+            await _s3.DeleteObjectsAsync(new DeleteObjectsRequest { BucketName = bucket, Objects = chunk.Select(k => new KeyVersion { Key = k }).ToList() }, ct);
+        }
+        _metrics.RecordOperation("BulkDelete", bucket, sw.Elapsed.TotalMilliseconds);
+        return keys.Count;
+    }
+
+    public async Task<int> EmptyBucketAsync(string bucket, CancellationToken ct)
+    {
+        var deleted = 0;
+        string? token = null;
+        do
+        {
+            var listed = await _s3.ListObjectsV2Async(new ListObjectsV2Request { BucketName = bucket, ContinuationToken = token, MaxKeys = 1000 }, ct);
+            if (listed.S3Objects.Count > 0)
+            {
+                await _s3.DeleteObjectsAsync(new DeleteObjectsRequest { BucketName = bucket, Objects = listed.S3Objects.Select(o => new KeyVersion { Key = o.Key }).ToList() }, ct);
+                deleted += listed.S3Objects.Count;
+            }
+            token = (listed.IsTruncated ?? false) ? listed.NextContinuationToken : null;
+        } while (token is not null);
+        return deleted;
     }
 
     public async Task<R2ObjectItem> UploadObjectAsync(string bucket, string key, Stream content, string contentType, IDictionary<string, string> metadata, CancellationToken ct)
@@ -690,8 +736,12 @@ public sealed class BucketsController : ControllerBase
     public Task<BucketSummary> CreateBucket([FromBody] CreateBucketRequest request, CancellationToken ct) => _admin.CreateBucketAsync(request, ct);
 
     [HttpDelete("{bucket}")]
-    public async Task<IActionResult> DeleteBucket(string bucket, CancellationToken ct)
+    public async Task<IActionResult> DeleteBucket(string bucket, [FromQuery] bool force = false, CancellationToken ct = default)
     {
+        if (force)
+        {
+            await _storage.EmptyBucketAsync(bucket, ct);
+        }
         await _admin.DeleteBucketAsync(bucket, ct);
         return NoContent();
     }
@@ -703,6 +753,13 @@ public sealed class BucketsController : ControllerBase
     [HttpPost("{bucket}/folders")]
     public Task<DirectoryEntry> CreateFolder(string bucket, [FromBody] CreateFolderRequest request, CancellationToken ct)
         => _storage.CreateFolderAsync(bucket, request.Prefix, request.CreateMarkerObject, ct);
+
+    [HttpDelete("{bucket}/folders")]
+    public async Task<IActionResult> DeleteFolder(string bucket, [FromQuery] string prefix, [FromQuery] bool recursive = false, CancellationToken ct = default)
+    {
+        var deletedCount = await _storage.DeleteFolderAsync(bucket, prefix, recursive, ct);
+        return Ok(new { deleted = true, bucket, prefix, deletedCount });
+    }
 
     [HttpPut("{bucket}/objects/content")]
     public async Task<R2ObjectItem> PutObjectContent(string bucket, [FromBody] SaveObjectContentRequest request, CancellationToken ct)

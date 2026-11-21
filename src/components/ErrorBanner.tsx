@@ -1,5 +1,6 @@
 import { AlertTriangle, X } from 'lucide-react';
 import type { ParsedClientError } from '../shared/errorHandler';
+import { useLocale } from '../shared/LocaleContext';
 
 interface ErrorBannerProps {
   error: ParsedClientError | null;
@@ -7,6 +8,7 @@ interface ErrorBannerProps {
 }
 
 export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
+  const { t } = useLocale();
   if (!error) return null;
 
   return (
@@ -26,7 +28,7 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
                 <>
                   <span aria-hidden="true" className="text-red-400">·</span>
                   <span className="font-mono text-xs text-red-700/80 dark:text-red-300/80">
-                    Trace {error.traceId}
+                    {t.errorBanner.traceLabel} {error.traceId}
                   </span>
                 </>
               )}
@@ -44,7 +46,7 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
         <button
           type="button"
           onClick={onDismiss}
-          aria-label="Fechar alerta de erro"
+          aria-label={t.errorBanner.dismissAria}
           className="p-1 rounded-md text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
         >
           <X className="h-4 w-4" />

@@ -9,6 +9,8 @@ import {
   YAxis,
 } from 'recharts';
 import { formatBytes } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
+import { useLocale } from '../shared/LocaleContext';
 import type { PerformanceMetricsSnapshot } from '../shared/types';
 
 interface TelemetryDashboardProps {
@@ -17,12 +19,16 @@ interface TelemetryDashboardProps {
 }
 
 export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps) {
+  const { t } = useLocale();
   const bucketData = metrics?.bucketMetrics ?? [];
+  const activeOps = (metrics?.operations ?? []).filter((op) => op.count > 0);
+  const totalStorageBytes = bucketData.reduce((acc, b) => acc + b.storageBytes, 0);
+  const totalBucketRequests = bucketData.reduce((acc, b) => acc + b.requestCount, 0);
 
   if (loading && !metrics) {
     return (
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-6 text-xs text-slate-500">
-        Carregando métricas de armazenamento, requisições e custos de egresso R2...
+        {t.telemetry.loadingDashboard}
       </section>
     );
   }
@@ -31,22 +37,29 @@ export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps
     <section className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Chart 1: R2 Bucket Storage Usage */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5">
-          <div className="mb-4">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Uso de Armazenamento por Bucket (KB / MB)
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Volume armazenado em tempo real via endpoint /api/telemetry/metrics
-            </p>
+        <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t.telemetry.storageChartTitle}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t.telemetry.storageChartSub}
+              </p>
+            </div>
+            <span className="text-xs font-mono tabular-nums text-slate-600 dark:text-slate-300 shrink-0">
+              {formatTemplate(t.telemetry.totalTrackedStorage, {
+                size: formatBytes(totalStorageBytes),
+              })}
+            </span>
           </div>
-          <div className="h-64 w-full">
+          <div className="h-64 w-full min-w-0">
             {bucketData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                Nenhum bucket disponível para gráfico.
+                {t.telemetry.emptyBucketsChart}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart
                   data={bucketData.map((b) => ({
                     name: b.bucket.replace('buckets-', ''),
@@ -68,8 +81,18 @@ export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Bar dataKey="storageKb" name="Armazenamento (KB)" fill="#EA580C" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="objects" name="Objetos" fill="#0EA5E9" radius={[4, 4, 0, 0]} />
+                  <Bar
+                    dataKey="storageKb"
+                    name={t.telemetry.storageSeriesLabel}
+                    fill="#EA580C"
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="objects"
+                    name={t.telemetry.objectsSeriesLabel}
+                    fill="#0EA5E9"
+                    radius={[4, 4, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -77,22 +100,29 @@ export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps
         </div>
 
         {/* Chart 2: Request Counts & R2 Zero Egress Savings */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5">
-          <div className="mb-4">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Requisições &amp; Comparativo de Custo de Egresso (USD)
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Cloudflare R2 ($0.00/GB egresso) versus tarifa S3 padrão ($0.09/GB)
-            </p>
+        <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t.telemetry.egressChartTitle}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t.telemetry.egressChartSub}
+              </p>
+            </div>
+            <span className="text-xs font-mono tabular-nums text-slate-600 dark:text-slate-300 shrink-0">
+              {formatTemplate(t.telemetry.totalTrackedRequests, {
+                count: totalBucketRequests,
+              })}
+            </span>
           </div>
-          <div className="h-64 w-full">
+          <div className="h-64 w-full min-w-0">
             {bucketData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                Nenhuma métrica de requisição disponível.
+                {t.telemetry.emptyRequestsChart}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart
                   data={bucketData.map((b) => ({
                     name: b.bucket.replace('buckets-', ''),
@@ -119,21 +149,21 @@ export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps
                   <Bar
                     yAxisId="left"
                     dataKey="requests"
-                    name="Requisições"
+                    name={t.telemetry.requestsSeriesLabel}
                     fill="#334155"
                     radius={[4, 4, 0, 0]}
                   />
                   <Bar
                     yAxisId="right"
                     dataKey="s3EgressUsd"
-                    name="Egresso S3 Equivalente ($)"
+                    name={t.telemetry.s3EgressSeriesLabel}
                     fill="#D97706"
                     radius={[4, 4, 0, 0]}
                   />
                   <Bar
                     yAxisId="right"
                     dataKey="r2EgressUsd"
-                    name="Egresso R2 ($0.00)"
+                    name={t.telemetry.r2EgressSeriesLabel}
                     fill="#16A34A"
                     radius={[4, 4, 0, 0]}
                   />
@@ -144,23 +174,86 @@ export function TelemetryDashboard({ metrics, loading }: TelemetryDashboardProps
         </div>
       </div>
 
+      {/* Chart 3: API Request Counts by Operation */}
+      <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {t.telemetry.opsChartTitle}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t.telemetry.opsChartSub}
+            </p>
+          </div>
+          <span className="text-xs font-mono tabular-nums text-slate-600 dark:text-slate-300 shrink-0">
+            {formatTemplate(t.telemetry.totalTrackedRequests, {
+              count: metrics?.totalRequests ?? 0,
+            })}
+          </span>
+        </div>
+        <div className="h-56 w-full min-w-0">
+          {activeOps.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-xs text-slate-500">
+              {t.telemetry.emptyOpsChart}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <BarChart
+                data={activeOps.map((op) => ({
+                  operation: op.operation,
+                  calls: op.count,
+                  errors: op.errorCount,
+                }))}
+                margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#94A3B8" strokeOpacity={0.2} />
+                <XAxis dataKey="operation" tick={{ fontSize: 11, fill: '#64748B' }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748B' }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#0F172A',
+                    borderColor: '#334155',
+                    borderRadius: '8px',
+                    color: '#F8FAFC',
+                    fontSize: '12px',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '12px' }} />
+                <Bar
+                  dataKey="calls"
+                  name={t.telemetry.opsCallsSeries}
+                  fill="#EA580C"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  dataKey="errors"
+                  name={t.telemetry.opsErrorsSeries}
+                  fill="#DC2626"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
       {/* Per-bucket cost & usage table */}
       {bucketData.length > 0 && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-slate-100">
-            Detalhamento por Bucket · Armazenamento, Tráfego e Egresso
+            {t.telemetry.bucketTableTitle}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  <th className="py-2.5 px-4">Bucket</th>
-                  <th className="py-2.5 px-3 text-right">Objetos</th>
-                  <th className="py-2.5 px-3 text-right">Uso Storage</th>
-                  <th className="py-2.5 px-3 text-right">Requisições</th>
-                  <th className="py-2.5 px-3 text-right">Egresso</th>
-                  <th className="py-2.5 px-3 text-right">Custo Egresso R2</th>
-                  <th className="py-2.5 px-4 text-right">Economia vs S3</th>
+                  <th className="py-2.5 px-4">{t.telemetry.colBucket}</th>
+                  <th className="py-2.5 px-3 text-right">{t.telemetry.colObjects}</th>
+                  <th className="py-2.5 px-3 text-right">{t.telemetry.colStorageUsage}</th>
+                  <th className="py-2.5 px-3 text-right">{t.telemetry.colRequests}</th>
+                  <th className="py-2.5 px-3 text-right">{t.telemetry.colEgress}</th>
+                  <th className="py-2.5 px-3 text-right">{t.telemetry.colR2EgressCost}</th>
+                  <th className="py-2.5 px-4 text-right">{t.telemetry.colSavingsVsS3}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-mono tabular-nums">

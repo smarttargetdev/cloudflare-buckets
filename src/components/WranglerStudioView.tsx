@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, Copy, Plus, Trash2 } from 'lucide-react';
 import { generateWranglerToml, type WranglerBindingConfig } from '../monorepo';
+import { useLocale } from '../shared/LocaleContext';
 import type { R2LocationHint } from '../shared/types';
 
 interface WranglerStudioViewProps {
@@ -8,6 +9,7 @@ interface WranglerStudioViewProps {
 }
 
 export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
+  const { t } = useLocale();
   const [workerName, setWorkerName] = useState('cloudflare-buckets-edge');
   const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>('production');
   const [enableAnalyticsEngine, setEnableAnalyticsEngine] = useState(true);
@@ -69,17 +71,17 @@ export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
       <section className="lg:col-span-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5 space-y-5">
         <div>
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Infraestrutura como Código (Wrangler)
+            {t.wrangler.title}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Configure bindings R2, Analytics Engine e Tail Worker para deploy automatizado
+            {t.wrangler.subtitle}
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Nome do Worker
+              {t.wrangler.workerNameLabel}
             </label>
             <input
               type="text"
@@ -101,7 +103,7 @@ export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Ambiente Deploy
+              {t.wrangler.environmentLabel}
             </label>
             <select
               value={environment}
@@ -135,7 +137,7 @@ export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
               onChange={(e) => setEnableAnalyticsEngine(e.target.checked)}
               className="accent-orange-600"
             />
-            Habilitar Analytics Engine (métricas de latência R2 na borda)
+            {t.wrangler.enableAnalytics}
           </label>
           <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
             <input
@@ -144,12 +146,12 @@ export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
               onChange={(e) => setEnableTailWorker(e.target.checked)}
               className="accent-orange-600"
             />
-            Habilitar Tail Worker Consumer (Seq / ELK / Application Insights)
+            {t.wrangler.enableTailWorker}
           </label>
         </div>
 
         <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
-          <div className="text-xs font-medium text-slate-700 dark:text-slate-300">Bindings R2 Ativos</div>
+          <div className="text-xs font-medium text-slate-700 dark:text-slate-300">{t.wrangler.activeBindings}</div>
           {bindings.map((b) => (
             <div
               key={b.binding}
@@ -214,7 +216,7 @@ export function WranglerStudioView({ onTomlChange }: WranglerStudioViewProps) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-300 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? 'Copiado' : 'Copiar TOML'}
+            {copied ? t.wrangler.copied : t.wrangler.copyToml}
           </button>
         </div>
 

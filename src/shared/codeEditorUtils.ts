@@ -1,3 +1,5 @@
+import { formatTemplate, getActiveLocale, getTranslation, type AppLocale } from './i18n';
+
 export type EditorLanguageId =
   | 'javascript'
   | 'typescript'
@@ -166,20 +168,27 @@ export function isEditableExtension(fileNameOrKey: string): boolean {
   return EXTENSION_MAP.has(ext) || ['cs', 'sh', 'ndjson', 'log'].includes(ext);
 }
 
-export function validateSyntaxHint(languageId: EditorLanguageId, content: string): string | null {
+export function validateSyntaxHint(
+  languageId: EditorLanguageId,
+  content: string,
+  locale: AppLocale = getActiveLocale(),
+): string | null {
+  const errText = getTranslation(locale).errors;
   if (languageId === 'json') {
     try {
       JSON.parse(content);
       return null;
     } catch (err) {
-      return err instanceof Error ? `JSON inválido: ${err.message}` : 'JSON inválido.';
+      return err instanceof Error
+        ? formatTemplate(errText.invalidJsonPrefix, { message: err.message })
+        : errText.invalidJsonGeneric;
     }
   }
   if (languageId === 'xml' && content.trim()) {
     const opens = (content.match(/<[a-zA-Z][^/?>]*>/g) ?? []).length;
     const closes = (content.match(/<\/[a-zA-Z][^>]*>/g) ?? []).length;
     if (opens > 0 && closes === 0 && !content.includes('/>')) {
-      return 'Aviso XML: nenhuma tag de fechamento detectada.';
+      return errText.xmlWarning;
     }
   }
   if (languageId === 'toml' && content.trim()) {
@@ -189,12 +198,12 @@ export function validateSyntaxHint(languageId: EditorLanguageId, content: string
       if (!trimmed || trimmed.startsWith('#')) continue;
       if (trimmed.startsWith('[')) {
         if (!trimmed.endsWith(']')) {
-          return `Aviso TOML (linha ${idx + 1}): cabeçalho de seção sem fechamento ']'.`;
+          return formatTemplate(errText.tomlBracketWarning, { line: idx + 1 });
         }
         continue;
       }
       if (!trimmed.includes('=') && !trimmed.startsWith('"') && !trimmed.startsWith("'") && !trimmed.endsWith(',')) {
-        return `Aviso TOML (linha ${idx + 1}): esperado formato chave = valor.`;
+        return formatTemplate(errText.tomlKeyValueWarning, { line: idx + 1 });
       }
     }
   }
