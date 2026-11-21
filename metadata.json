@@ -1,0 +1,6 @@
+{
+  "name": "Cloudflare Buckets",
+  "description": "Cloudflare Buckets (Buckets) — Gerenciamento de buckets R2, diretórios hierárquicos, busca por metadados, operações em lote, telemetria centralizada, simulador Expo universal e monorepo .NET 10 + Wrangler IaC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
