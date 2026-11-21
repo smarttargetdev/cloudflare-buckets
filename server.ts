@@ -14,6 +14,19 @@ import type {
 
 const PORT = Number(process.env.PORT) || 3000;
 
+function getBucketName(req: Request): string {
+  const bucketName = req.params.bucket;
+  if (typeof bucketName !== 'string') {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'BUCKET_NAME_INVALID',
+      title: 'Invalid Bucket Name',
+      detail: 'The bucket name route parameter must be a string.',
+    });
+  }
+  return bucketName;
+}
+
 function extractConnectionContext(req: Request): {
   mode: ConnectionMode;
   creds?: CloudflareCredentials;
@@ -153,7 +166,7 @@ async function startServer() {
   app.delete('/api/buckets/:bucket', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const force = req.query.force === 'true' || req.body?.force === true;
       await instrument(req, res, 'DeleteBucket', async () => {
         const result = await engine.deleteBucket(bucketName, mode, creds, { force }, localFolderPath);
@@ -173,7 +186,7 @@ async function startServer() {
   app.get('/api/buckets/:bucket/objects', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : '';
       await instrument(req, res, 'ListObjectsV2', async () => {
         const listing = await engine.listDirectory(bucketName, prefix, mode, creds, localFolderPath);
@@ -192,7 +205,7 @@ async function startServer() {
   app.post('/api/buckets/:bucket/folders', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const { prefix, createMarkerObject = true } = req.body ?? {};
       await instrument(req, res, 'CreateFolderMarker', async () => {
         const folder = await engine.createFolder(bucketName, prefix, createMarkerObject, mode, creds, localFolderPath);
@@ -211,7 +224,7 @@ async function startServer() {
   app.delete('/api/buckets/:bucket/folders', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : String(req.body?.prefix ?? '');
       const recursive = req.query.recursive === 'true' || req.body?.recursive === true;
       await instrument(req, res, 'BulkDelete', async () => {
@@ -231,7 +244,7 @@ async function startServer() {
   app.post('/api/buckets/:bucket/objects/upload', upload.single('file'), async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const file = req.file;
       if (!file) {
         throw new AppApiError({
@@ -281,7 +294,7 @@ async function startServer() {
   app.put('/api/buckets/:bucket/objects/content', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const { key, content = '', contentType = 'text/plain', metadata = {} } = req.body ?? {};
       if (typeof key !== 'string' || !key.trim()) {
         throw new AppApiError({
@@ -319,7 +332,7 @@ async function startServer() {
   app.get('/api/buckets/:bucket/objects/preview', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const key = typeof req.query.key === 'string' ? req.query.key : '';
       await instrument(req, res, 'GetObject', async () => {
         const preview = await engine.getObjectPreview(bucketName, key, mode, creds, localFolderPath);
@@ -341,7 +354,7 @@ async function startServer() {
     const traceId = res.locals.traceId as string;
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const key = typeof req.query.key === 'string' ? req.query.key : '';
       const file = await engine.getObjectBuffer(bucketName, key, mode, creds, localFolderPath);
       const durationMs = Math.max(1, Math.round(performance.now() - started));
@@ -366,7 +379,7 @@ async function startServer() {
   app.post('/api/buckets/:bucket/objects/presign', async (req, res, next) => {
     try {
       const { mode, creds, localFolderPath } = extractConnectionContext(req);
-      const bucketName = req.params.bucket;
+      const bucketName = getBucketName(req);
       const { key, expiresInSeconds = 900 } = req.body ?? {};
       await instrument(req, res, 'PresignUrl', async () => {
         const result = await engine.presignUrl(bucketName, key, expiresInSeconds, mode, creds, localFolderPath);
