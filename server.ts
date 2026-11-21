@@ -12,7 +12,7 @@ import type {
   R2OperationName,
 } from './src/shared/types';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 function extractConnectionContext(req: Request): {
   mode: ConnectionMode;
