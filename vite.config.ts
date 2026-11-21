@@ -6,9 +6,6 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    build: {
-      outDir: 'distributions',
-    },
     plugins: [
       react(),
       tailwindcss(),
@@ -22,9 +19,9 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'distributions');
+          const distDir = path.resolve(__dirname, 'dists);
           const srcAssets = path.resolve(__dirname, 'manager/assets');
-          const distAssets = path.resolve(distDir, 'manager/assets');
+          const distAssets = path.resolve(distDir, 'assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
           }
