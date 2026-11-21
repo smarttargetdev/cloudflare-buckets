@@ -120,6 +120,7 @@ function AppShell() {
   const handleSaveConnection = (next: ApiConnectionConfig) => {
     apiClient.setConnectionConfig(next);
     setConnectionConfig(next);
+    setCurrentPrefix('');
     setConnectionVersion((v) => v + 1);
   };
 
@@ -182,12 +183,16 @@ function AppShell() {
             title={
               connectionConfig.mode === 'cloudflare'
                 ? t.shell.r2Connected
-                : t.shell.r2Credentials
+                : connectionConfig.mode === 'local'
+                  ? t.shell.localFolderConnected
+                  : t.shell.r2Credentials
             }
             aria-label={
               connectionConfig.mode === 'cloudflare'
                 ? t.shell.r2Connected
-                : t.shell.r2Credentials
+                : connectionConfig.mode === 'local'
+                  ? t.shell.localFolderConnected
+                  : t.shell.r2Credentials
             }
             className="inline-flex items-center justify-center p-2 text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors shrink-0"
           >
@@ -233,8 +238,21 @@ function AppShell() {
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-1 text-xs text-slate-500 dark:text-slate-400">
             <div className="font-medium text-slate-700 dark:text-slate-300">
-              Buckets · {connectionConfig.mode === 'cloudflare' ? t.shell.cloudflareR2 : t.shell.sandboxLocal}
+              Buckets ·{' '}
+              {connectionConfig.mode === 'cloudflare'
+                ? t.shell.cloudflareR2
+                : connectionConfig.mode === 'local'
+                  ? t.shell.localFolder
+                  : t.shell.sandboxLocal}
             </div>
+            {connectionConfig.mode === 'local' && connectionConfig.localFolderPath && (
+              <div
+                className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate"
+                title={connectionConfig.localFolderPath}
+              >
+                {connectionConfig.localFolderPath}
+              </div>
+            )}
             <div>{t.shell.shortcutHint}</div>
           </div>
         </aside>

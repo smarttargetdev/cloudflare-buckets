@@ -1,6 +1,6 @@
 export type R2LocationHint = 'WNAM' | 'ENAM' | 'WEUR' | 'EEUR' | 'APAC';
 export type R2StorageClass = 'Standard' | 'InfrequentAccess';
-export type ConnectionMode = 'sandbox' | 'cloudflare';
+export type ConnectionMode = 'sandbox' | 'local' | 'cloudflare';
 export type LogSinkId = 'RollingFile' | 'ApplicationInsights' | 'Seq' | 'ElkStack';
 
 export interface CloudflareCredentials {
@@ -8,6 +8,14 @@ export interface CloudflareCredentials {
   apiToken: string;
   accessKeyId: string;
   secretAccessKey: string;
+}
+
+export interface LocalFolderInspectResponse {
+  valid: boolean;
+  resolvedPath: string;
+  exists: boolean;
+  writable: boolean;
+  bucketCount: number;
 }
 
 export interface BucketSummary {

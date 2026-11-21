@@ -43,6 +43,10 @@ test('pt-BR and en-US translation catalogs have strict leaf key parity', () => {
   const enKeys = collectLeafKeys(TRANSLATIONS['en-US'] as unknown as Record<string, unknown>);
   assert.deepEqual(ptKeys, enKeys);
   assert.ok(ptKeys.length > 100);
+  assert.equal(TRANSLATIONS['pt-BR'].drawer.cloudflareReal, 'Cloudflare Server');
+  assert.equal(TRANSLATIONS['en-US'].drawer.cloudflareReal, 'Cloudflare Server');
+  assert.equal(TRANSLATIONS['pt-BR'].shell.cloudflareR2, 'Cloudflare Server');
+  assert.equal(TRANSLATIONS['en-US'].shell.cloudflareR2, 'Cloudflare Server');
 });
 
 test('setActiveLocale switches translations across parseApiError and validateSyntaxHint', () => {

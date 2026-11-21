@@ -107,18 +107,25 @@ export function CodeEditorWorkspace({
       .listBuckets()
       .then((list) => {
         setBuckets(list);
-        if (list.length > 0 && !list.some((b) => b.name === bucket)) {
+        if (list.length === 0) {
+          setBucket('');
+          setBucketObjects([]);
+        } else if (!list.some((b) => b.name === bucket)) {
           setBucket(list[0].name);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setBuckets([]);
+      });
   }, [connectionVersion, bucket]);
 
   useEffect(() => {
-    if (bucket) {
+    if (bucket && buckets.some((b) => b.name === bucket)) {
       loadBucketObjects(bucket);
+    } else {
+      setBucketObjects([]);
     }
-  }, [bucket, connectionVersion, loadBucketObjects]);
+  }, [bucket, buckets, connectionVersion, loadBucketObjects]);
 
   useEffect(() => {
     if (!target) return;

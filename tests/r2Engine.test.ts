@@ -1,6 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { R2StorageEngine, validateBucketName, validateFolderPrefix } from '../server/r2Engine';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  R2StorageEngine,
+  resolveSafeLocalRoot,
+  validateBucketName,
+  validateFolderPrefix,
+} from '../server/r2Engine';
 import { AppApiError } from '../server/errors';
 
 describe('R2StorageEngine — Buckets, Hierarchical Folders, Search & Bulk Ops', () => {
@@ -121,4 +129,125 @@ describe('R2StorageEngine — Buckets, Hierarchical Folders, Search & Bulk Ops',
     const rootAfter = await engine.listDirectory('buckets-prod-assets', '', 'sandbox');
     assert.ok(!rootAfter.folders.some((f) => f.prefix === 'branding/'));
   });
+
+  it('rejects restricted system directories and invalid host folder paths', () => {
+    assert.throws(
+      () => resolveSafeLocalRoot(''),
+      (err: unknown) => err instanceof AppApiError && err.errorCode === 'LOCAL_FOLDER_INVALID',
+    );
+    assert.throws(
+      () => resolveSafeLocalRoot('/etc'),
+      (err: unknown) => err instanceof AppApiError && err.errorCode === 'LOCAL_FOLDER_SYSTEM_RESTRICTED',
+    );
+    assert.throws(
+      () => resolveSafeLocalRoot('/'),
+      (err: unknown) => err instanceof AppApiError && err.errorCode === 'LOCAL_FOLDER_SYSTEM_RESTRICTED',
+    );
+  });
+
+  it('persists buckets, folders, files, metadata, search, bulk move, and safe deletes in a host local folder', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'buckets-local-test-'));
+    const engine = new R2StorageEngine();
+
+    try {
+      const inspected = await engine.inspectLocalFolder(tempRoot, true);
+      assert.equal(inspected.valid, true);
+      assert.equal(inspected.writable, true);
+      assert.equal(inspected.bucketCount, 0);
+
+      await engine.createBucket(
+        { name: 'local-assets', locationHint: 'ENAM', storageClass: 'Standard' },
+        'local',
+        undefined,
+        tempRoot,
+      );
+      await engine.createBucket(
+        { name: 'local-archive', locationHint: 'WNAM', storageClass: 'InfrequentAccess' },
+        'local',
+        undefined,
+        tempRoot,
+      );
+
+      await engine.createFolder('local-assets', 'configs/edge', true, 'local', undefined, tempRoot);
+      await engine.putObject(
+        'local-assets',
+        'configs/edge/worker.json',
+        Buffer.from('{"route":"*"}', 'utf-8'),
+        'application/json',
+        { env: 'host-local', owner: 'cli' },
+        'local',
+        undefined,
+        tempRoot,
+      );
+
+      // Verify real file exists on host filesystem
+      const diskFile = await fs.readFile(path.join(tempRoot, 'local-assets', 'configs/edge/worker.json'), 'utf-8');
+      assert.equal(diskFile, '{"route":"*"}');
+
+      // List buckets reflects real file count and bytes (ignoring sidecar manifest)
+      const buckets = await engine.listBuckets('local', undefined, tempRoot);
+      const assetsBucket = buckets.find((b) => b.name === 'local-assets');
+      assert.ok(assetsBucket);
+      assert.equal(assetsBucket.objectCount, 1);
+      assert.equal(assetsBucket.totalBytes, Buffer.byteLength('{"route":"*"}'));
+
+      // Preview & search by metadata tag
+      const preview = await engine.getObjectPreview('local-assets', 'configs/edge/worker.json', 'local', undefined, tempRoot);
+      assert.equal(preview.textContent, '{"route":"*"}');
+      assert.equal(preview.metadata.owner, 'cli');
+
+      const search = await engine.searchObjects({ tagKey: 'env', tagValue: 'host-local' }, 'local', undefined, tempRoot);
+      assert.equal(search.totalMatches, 1);
+      assert.equal(search.results[0].bucket, 'local-assets');
+
+      // Path traversal rejection on object key
+      await assert.rejects(
+        () =>
+          engine.putObject(
+            'local-assets',
+            '../../escape.txt',
+            Buffer.from('bad'),
+            'text/plain',
+            {},
+            'local',
+            undefined,
+            tempRoot,
+          ),
+        (err: unknown) => err instanceof AppApiError && err.errorCode === 'OBJECT_KEY_INVALID',
+      );
+
+      // Bulk move across buckets on disk
+      const moveRes = await engine.bulkMove(
+        {
+          sourceBucket: 'local-assets',
+          destinationBucket: 'local-archive',
+          destinationPrefix: '2026/',
+          keys: ['configs/edge/worker.json'],
+          overwrite: false,
+        },
+        'local',
+        undefined,
+        tempRoot,
+      );
+      assert.equal(moveRes.succeededCount, 1);
+      const archivedListing = await engine.listDirectory('local-archive', '2026/', 'local', undefined, tempRoot);
+      assert.equal(archivedListing.objects.length, 1);
+      assert.equal(archivedListing.objects[0].fileName, 'worker.json');
+
+      // Guard non-empty bucket delete vs force=true
+      await assert.rejects(
+        () => engine.deleteBucket('local-archive', 'local', undefined, { force: false }, tempRoot),
+        (err: unknown) => err instanceof AppApiError && err.errorCode === 'BUCKET_NOT_EMPTY',
+      );
+      await engine.deleteBucket('local-archive', 'local', undefined, { force: true }, tempRoot);
+
+      // Force-delete remaining bucket leaves zero buckets cleanly
+      await engine.deleteBucket('local-assets', 'local', undefined, { force: true }, tempRoot);
+      const afterAllDeleted = await engine.listBuckets('local', undefined, tempRoot);
+      assert.equal(afterAllDeleted.length, 0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
+

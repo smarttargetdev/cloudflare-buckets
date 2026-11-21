@@ -34,13 +34,22 @@ export function ExpoSimulatorView() {
   useEffect(() => {
     apiClient.listBuckets().then((list) => {
       setBuckets(list);
-      if (list.length > 0 && !list.some((b) => b.name === bucket)) {
+      if (list.length === 0) {
+        setBucket('');
+        setListing(null);
+        setSelectedKeys(new Set());
+      } else if (!list.some((b) => b.name === bucket)) {
         setBucket(list[0].name);
       }
     }).catch((err) => setError(err as ParsedClientError));
-  }, [bucket]);
+  }, []);
 
   const refreshDir = async (targetBucket = bucket, targetPrefix = prefix) => {
+    if (!targetBucket || !buckets.some((b) => b.name === targetBucket)) {
+      setListing(null);
+      setSelectedKeys(new Set());
+      return;
+    }
     setError(null);
     try {
       const res = await apiClient.listDirectory(targetBucket, targetPrefix);
@@ -53,7 +62,7 @@ export function ExpoSimulatorView() {
 
   useEffect(() => {
     refreshDir(bucket, prefix);
-  }, [bucket, prefix]);
+  }, [bucket, prefix, buckets]);
 
   const handleBulkDeleteInExpo = async () => {
     if (selectedKeys.size === 0) return;

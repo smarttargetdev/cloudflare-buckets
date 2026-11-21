@@ -1,8 +1,14 @@
-import { useState } from 'react';
-import { ShieldCheck, X } from 'lucide-react';
-import type { ApiConnectionConfig } from '../services/apiClient';
+import { useEffect, useState } from 'react';
+import { FolderOpen, ShieldCheck, X } from 'lucide-react';
+import { apiClient, type ApiConnectionConfig } from '../services/apiClient';
+import type { ParsedClientError } from '../shared/errorHandler';
+import { formatTemplate } from '../shared/i18n';
 import { useLocale } from '../shared/LocaleContext';
-import type { CloudflareCredentials, ConnectionMode } from '../shared/types';
+import type {
+  CloudflareCredentials,
+  ConnectionMode,
+  LocalFolderInspectResponse,
+} from '../shared/types';
 
 interface ConnectionDrawerProps {
   open: boolean;
@@ -14,21 +20,94 @@ interface ConnectionDrawerProps {
 export function ConnectionDrawer({ open, config, onClose, onSave }: ConnectionDrawerProps) {
   const { t } = useLocale();
   const [mode, setMode] = useState<ConnectionMode>(config.mode);
+  const [localFolderPath, setLocalFolderPath] = useState(
+    config.localFolderPath || './data/buckets',
+  );
   const [creds, setCreds] = useState<CloudflareCredentials>(config.credentials);
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  const [verifyingFolder, setVerifyingFolder] = useState(false);
+  const [inspectResult, setInspectResult] = useState<LocalFolderInspectResponse | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setMode(config.mode);
+      setLocalFolderPath(config.localFolderPath || './data/buckets');
+      setCreds(config.credentials);
+      setValidationMsg(null);
+      setInspectResult(null);
+    }
+  }, [open, config]);
 
   if (!open) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleModeSwitch = (nextMode: ConnectionMode) => {
+    setMode(nextMode);
+    setValidationMsg(null);
+    setInspectResult(null);
+  };
+
+  const handleVerifyLocalFolder = async () => {
+    const trimmed = localFolderPath.trim();
+    if (!trimmed) {
+      setValidationMsg(t.drawer.localFolderMissing);
+      setInspectResult(null);
+      return;
+    }
+    setVerifyingFolder(true);
+    setValidationMsg(null);
+    try {
+      const res = await apiClient.inspectLocalFolder(trimmed, true);
+      setInspectResult(res);
+      setLocalFolderPath(res.resolvedPath);
+    } catch (err) {
+      const parsed = err as ParsedClientError;
+      setInspectResult(null);
+      setValidationMsg(parsed.userMessage || t.drawer.localFolderMissing);
+    } finally {
+      setVerifyingFolder(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mode === 'cloudflare') {
       if (!creds.accountId.trim() || !creds.accessKeyId.trim() || !creds.secretAccessKey.trim()) {
         setValidationMsg(t.drawer.validationMissing);
         return;
       }
+      setValidationMsg(null);
+      onSave({ mode, localFolderPath, credentials: creds });
+      onClose();
+      return;
     }
+
+    if (mode === 'local') {
+      const trimmed = localFolderPath.trim();
+      if (!trimmed) {
+        setValidationMsg(t.drawer.localFolderMissing);
+        return;
+      }
+      setVerifyingFolder(true);
+      setValidationMsg(null);
+      try {
+        const res = await apiClient.inspectLocalFolder(trimmed, true);
+        onSave({
+          mode: 'local',
+          localFolderPath: res.resolvedPath,
+          credentials: creds,
+        });
+        onClose();
+      } catch (err) {
+        const parsed = err as ParsedClientError;
+        setValidationMsg(parsed.userMessage || t.drawer.localFolderMissing);
+      } finally {
+        setVerifyingFolder(false);
+      }
+      return;
+    }
+
     setValidationMsg(null);
-    onSave({ mode, credentials: creds });
+    onSave({ mode: 'sandbox', localFolderPath, credentials: creds });
     onClose();
   };
 
@@ -57,11 +136,11 @@ export function ConnectionDrawer({ open, config, onClose, onSave }: ConnectionDr
             <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
               {t.drawer.executionModeLabel}
             </label>
-            <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80">
+            <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80">
               <button
                 type="button"
-                onClick={() => setMode('sandbox')}
-                className={`px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                onClick={() => handleModeSwitch('sandbox')}
+                className={`px-2 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                   mode === 'sandbox'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -71,8 +150,19 @@ export function ConnectionDrawer({ open, config, onClose, onSave }: ConnectionDr
               </button>
               <button
                 type="button"
-                onClick={() => setMode('cloudflare')}
-                className={`px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                onClick={() => handleModeSwitch('local')}
+                className={`px-2 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                  mode === 'local'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                {t.drawer.localFolder}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeSwitch('cloudflare')}
+                className={`px-2 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                   mode === 'cloudflare'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -82,9 +172,71 @@ export function ConnectionDrawer({ open, config, onClose, onSave }: ConnectionDr
               </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              {mode === 'sandbox' ? t.drawer.sandboxDesc : t.drawer.cloudflareDesc}
+              {mode === 'sandbox'
+                ? t.drawer.sandboxDesc
+                : mode === 'local'
+                  ? t.drawer.localFolderDesc
+                  : t.drawer.cloudflareDesc}
             </p>
           </div>
+
+          {mode === 'local' && (
+            <div className="space-y-4 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    {t.drawer.localFolderPathLabel}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocalFolderPath('./data/buckets');
+                      setInspectResult(null);
+                      setValidationMsg(null);
+                    }}
+                    className="text-[11px] font-medium text-orange-600 dark:text-orange-400 hover:underline"
+                  >
+                    {t.drawer.localFolderQuickPreset}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={localFolderPath}
+                  onChange={(e) => {
+                    setLocalFolderPath(e.target.value);
+                    setInspectResult(null);
+                  }}
+                  placeholder={t.drawer.localFolderPathPlaceholder}
+                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleVerifyLocalFolder}
+                  disabled={verifyingFolder}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />
+                  {verifyingFolder ? t.drawer.localFolderVerifying : t.drawer.localFolderVerify}
+                </button>
+              </div>
+
+              {inspectResult && (
+                <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 px-3 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 font-mono break-all">
+                  {formatTemplate(t.drawer.localFolderVerified, {
+                    path: inspectResult.resolvedPath,
+                    count: inspectResult.bucketCount,
+                  })}
+                </div>
+              )}
+
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                {t.drawer.localFolderNote}
+              </p>
+            </div>
+          )}
 
           {mode === 'cloudflare' && (
             <div className="space-y-4 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -160,7 +312,8 @@ export function ConnectionDrawer({ open, config, onClose, onSave }: ConnectionDr
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors"
+              disabled={verifyingFolder}
+              className="px-4 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors disabled:opacity-50"
             >
               {t.drawer.apply}
             </button>

@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import path from 'node:path';
 import {
   S3Client,
   ListBucketsCommand,
@@ -25,6 +28,7 @@ import type {
   CreateBucketRequest,
   DirectoryEntry,
   DirectoryListing,
+  LocalFolderInspectResponse,
   ObjectPreviewResponse,
   PresignedUrlResponse,
   R2LocationHint,
@@ -34,6 +38,42 @@ import type {
   SearchResponse,
   SearchResultItem,
 } from '../src/shared/types';
+
+const LOCAL_META_FILENAME = '.buckets-meta.json';
+
+interface LocalBucketMeta {
+  createdAt: string;
+  locationHint: R2LocationHint;
+  storageClass: R2StorageClass;
+  publicDomain?: string;
+  corsEnabled: boolean;
+  folders: string[];
+  objects: Record<
+    string,
+    {
+      contentType: string;
+      metadata: Record<string, string>;
+      storageClass?: R2StorageClass;
+    }
+  >;
+}
+
+const BLOCKED_SYSTEM_ROOTS = [
+  '/',
+  '/etc',
+  '/usr',
+  '/bin',
+  '/sbin',
+  '/lib',
+  '/lib64',
+  '/boot',
+  '/dev',
+  '/proc',
+  '/sys',
+  '/root',
+  '/var',
+  '/run',
+];
 
 interface SandboxObjectRecord {
   key: string;
@@ -73,7 +113,7 @@ export function validateBucketName(name: string): void {
 
 export function validateFolderPrefix(prefix: string): string {
   const cleaned = prefix.trim().replace(/^\/+/, '');
-  if (!cleaned || cleaned.includes('..') || cleaned.includes('\\')) {
+  if (!cleaned || cleaned.includes('..') || cleaned.includes('\\') || cleaned.includes('\0')) {
     throw new AppApiError({
       status: 400,
       errorCode: 'FOLDER_INVALID_NAME',
@@ -84,7 +124,112 @@ export function validateFolderPrefix(prefix: string): string {
       },
     });
   }
-  return normalizePrefix(cleaned);
+  const normalized = normalizePrefix(cleaned);
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.some((s) => s === '.' || s === '..' || s === LOCAL_META_FILENAME)) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'FOLDER_INVALID_NAME',
+      title: 'Invalid Directory Prefix',
+      detail: 'Folder paths cannot reference reserved or relative path segments.',
+    });
+  }
+  return normalized;
+}
+
+export function resolveSafeLocalRoot(rawPath?: string): string {
+  const trimmed = (rawPath ?? '').trim();
+  if (!trimmed || trimmed.includes('\0') || trimmed.includes('\n') || trimmed.includes('\r')) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'LOCAL_FOLDER_INVALID',
+      title: 'Invalid Local Folder Path',
+      detail: 'Provide a valid non-empty host folder path (e.g. "./data/buckets").',
+    });
+  }
+
+  const resolved = path.resolve(trimmed);
+  const normalizedLower = resolved.toLowerCase();
+
+  for (const sysRoot of BLOCKED_SYSTEM_ROOTS) {
+    if (resolved === sysRoot) {
+      throw new AppApiError({
+        status: 400,
+        errorCode: 'LOCAL_FOLDER_SYSTEM_RESTRICTED',
+        title: 'Restricted System Path',
+        detail: `Protected system root "${resolved}" cannot be used for bucket storage.`,
+      });
+    }
+    if (
+      sysRoot !== '/' &&
+      sysRoot !== '/var' &&
+      resolved.startsWith(sysRoot + path.sep)
+    ) {
+      throw new AppApiError({
+        status: 400,
+        errorCode: 'LOCAL_FOLDER_SYSTEM_RESTRICTED',
+        title: 'Restricted System Path',
+        detail: `System directory "${resolved}" cannot be used for bucket storage.`,
+      });
+    }
+  }
+
+  if (
+    /^[a-z]:\\?$/i.test(resolved) ||
+    normalizedLower === 'c:\\windows' ||
+    normalizedLower.startsWith('c:\\windows\\') ||
+    normalizedLower.startsWith('c:\\program files')
+  ) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'LOCAL_FOLDER_SYSTEM_RESTRICTED',
+      title: 'Restricted System Path',
+      detail: `System directory "${resolved}" cannot be used for bucket storage.`,
+    });
+  }
+
+  return resolved;
+}
+
+function assertStrictlyInside(targetPath: string, parentDir: string): void {
+  const resolvedParent = path.resolve(parentDir);
+  const resolvedTarget = path.resolve(targetPath);
+  if (
+    resolvedTarget === resolvedParent ||
+    !resolvedTarget.startsWith(resolvedParent + path.sep)
+  ) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'FOLDER_INVALID_NAME',
+      title: 'Path Traversal Rejected',
+      detail: 'Target path escapes the configured storage root.',
+    });
+  }
+}
+
+function resolveSafeKeySegments(rawKey: string): string[] {
+  const trimmed = rawKey.trim().replace(/^\/+/, '');
+  if (!trimmed || trimmed.includes('\0') || trimmed.includes('\\')) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'OBJECT_KEY_INVALID',
+      title: 'Invalid Object Key',
+      detail: 'Object key cannot be empty or contain invalid characters.',
+    });
+  }
+  const segments = trimmed.split('/').filter((s) => s.length > 0);
+  if (
+    segments.length === 0 ||
+    segments.some((s) => s === '.' || s === '..' || s === LOCAL_META_FILENAME)
+  ) {
+    throw new AppApiError({
+      status: 400,
+      errorCode: 'OBJECT_KEY_INVALID',
+      title: 'Invalid Object Key',
+      detail: 'Object key contains disallowed path segments.',
+    });
+  }
+  return segments;
 }
 
 export class R2StorageEngine {
@@ -259,9 +404,201 @@ export class R2StorageEngine {
     });
   }
 
+  private async ensureLocalRoot(localRootPath?: string): Promise<string> {
+    const rootDir = resolveSafeLocalRoot(localRootPath);
+    try {
+      const stat = await fs.stat(rootDir).catch(() => null);
+      if (stat && !stat.isDirectory()) {
+        throw new AppApiError({
+          status: 400,
+          errorCode: 'LOCAL_FOLDER_INVALID',
+          title: 'Invalid Local Folder',
+          detail: `Path "${rootDir}" exists and is not a directory.`,
+        });
+      }
+      if (!stat) {
+        await fs.mkdir(rootDir, { recursive: true });
+      }
+      await fs.access(rootDir, fsConstants.R_OK | fsConstants.W_OK);
+      return await fs.realpath(rootDir);
+    } catch (err) {
+      if (err instanceof AppApiError) throw err;
+      throw new AppApiError({
+        status: 400,
+        errorCode: 'LOCAL_FOLDER_UNREACHABLE',
+        title: 'Local Folder Unreachable',
+        detail: `Cannot access or write to host folder "${rootDir}": ${err instanceof Error ? err.message : 'permission error'}`,
+      });
+    }
+  }
+
+  private async resolveLocalBucketDir(
+    bucketName: string,
+    localRootPath?: string,
+    mustExist = true,
+  ): Promise<{ rootDir: string; bucketDir: string }> {
+    validateBucketName(bucketName);
+    const rootDir = await this.ensureLocalRoot(localRootPath);
+    const bucketDir = path.resolve(rootDir, bucketName);
+    assertStrictlyInside(bucketDir, rootDir);
+
+    if (mustExist) {
+      const stat = await fs.lstat(bucketDir).catch(() => null);
+      if (!stat || !stat.isDirectory()) {
+        throw new AppApiError({
+          status: 404,
+          errorCode: 'BUCKET_NOT_FOUND',
+          title: 'Bucket Not Found',
+          detail: `Bucket "${bucketName}" was not found in "${rootDir}".`,
+        });
+      }
+      const realBucket = await fs.realpath(bucketDir);
+      assertStrictlyInside(realBucket, rootDir);
+      return { rootDir, bucketDir: realBucket };
+    }
+    return { rootDir, bucketDir };
+  }
+
+  private async readLocalBucketMeta(bucketDir: string): Promise<LocalBucketMeta> {
+    const metaPath = path.join(bucketDir, LOCAL_META_FILENAME);
+    try {
+      const raw = await fs.readFile(metaPath, 'utf-8');
+      const parsed = JSON.parse(raw) as Partial<LocalBucketMeta>;
+      return {
+        createdAt: parsed.createdAt || new Date().toISOString(),
+        locationHint: parsed.locationHint || 'ENAM',
+        storageClass: parsed.storageClass || 'Standard',
+        publicDomain: parsed.publicDomain,
+        corsEnabled: parsed.corsEnabled ?? true,
+        folders: Array.isArray(parsed.folders) ? parsed.folders : [],
+        objects: parsed.objects && typeof parsed.objects === 'object' ? parsed.objects : {},
+      };
+    } catch {
+      const stat = await fs.stat(bucketDir).catch(() => null);
+      return {
+        createdAt: stat ? stat.birthtime.toISOString() : new Date().toISOString(),
+        locationHint: 'ENAM',
+        storageClass: 'Standard',
+        corsEnabled: true,
+        folders: [],
+        objects: {},
+      };
+    }
+  }
+
+  private async writeLocalBucketMeta(bucketDir: string, meta: LocalBucketMeta): Promise<void> {
+    const metaPath = path.join(bucketDir, LOCAL_META_FILENAME);
+    await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+  }
+
+  private async walkLocalFiles(
+    baseDir: string,
+    prefix = '',
+  ): Promise<Array<{ key: string; fullPath: string; size: number; mtimeMs: number }>> {
+    const results: Array<{ key: string; fullPath: string; size: number; mtimeMs: number }> = [];
+    const entries = await fs.readdir(baseDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.name === LOCAL_META_FILENAME) continue;
+      const fullPath = path.join(baseDir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        const nested = await this.walkLocalFiles(fullPath, `${prefix}${entry.name}/`);
+        results.push(...nested);
+      } else if (entry.isFile()) {
+        const stat = await fs.stat(fullPath).catch(() => null);
+        if (stat) {
+          results.push({
+            key: `${prefix}${entry.name}`,
+            fullPath,
+            size: stat.size,
+            mtimeMs: stat.mtimeMs,
+          });
+        }
+      }
+    }
+    return results;
+  }
+
+  private async countLocalDirectChildren(dirPath: string): Promise<number> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
+    return entries.filter((e) => e.name !== LOCAL_META_FILENAME).length;
+  }
+
+  private async computeLocalEtag(filePath: string, size: number, mtimeMs: number): Promise<string> {
+    if (size <= 4 * 1024 * 1024) {
+      const buf = await fs.readFile(filePath);
+      return `"${crypto.createHash('md5').update(buf).digest('hex')}"`;
+    }
+    return `"${crypto.createHash('md5').update(`${size}:${mtimeMs}`).digest('hex')}"`;
+  }
+
+  public async inspectLocalFolder(
+    localRootPath: string,
+    createIfMissing = true,
+  ): Promise<LocalFolderInspectResponse> {
+    const resolved = resolveSafeLocalRoot(localRootPath);
+    const stat = await fs.stat(resolved).catch(() => null);
+    if (stat && !stat.isDirectory()) {
+      throw new AppApiError({
+        status: 400,
+        errorCode: 'LOCAL_FOLDER_INVALID',
+        title: 'Invalid Local Folder',
+        detail: `Path "${resolved}" exists and is not a directory.`,
+      });
+    }
+
+    if (!stat) {
+      if (!createIfMissing) {
+        return {
+          valid: false,
+          resolvedPath: resolved,
+          exists: false,
+          writable: false,
+          bucketCount: 0,
+        };
+      }
+      try {
+        await fs.mkdir(resolved, { recursive: true });
+      } catch (err) {
+        throw new AppApiError({
+          status: 400,
+          errorCode: 'LOCAL_FOLDER_UNREACHABLE',
+          title: 'Cannot Create Local Folder',
+          detail: `Failed to initialize "${resolved}": ${err instanceof Error ? err.message : 'permission denied'}`,
+        });
+      }
+    }
+
+    try {
+      await fs.access(resolved, fsConstants.R_OK | fsConstants.W_OK);
+    } catch {
+      throw new AppApiError({
+        status: 400,
+        errorCode: 'LOCAL_FOLDER_UNREACHABLE',
+        title: 'Local Folder Not Writable',
+        detail: `Host directory "${resolved}" is not readable/writable.`,
+      });
+    }
+
+    const realRoot = await fs.realpath(resolved);
+    const entries = await fs.readdir(realRoot, { withFileTypes: true });
+    const bucketCount = entries.filter(
+      (e) => e.isDirectory() && !e.name.startsWith('.') && BUCKET_NAME_REGEX.test(e.name),
+    ).length;
+
+    return {
+      valid: true,
+      resolvedPath: realRoot,
+      exists: true,
+      writable: true,
+      bucketCount,
+    };
+  }
+
   public async listBuckets(
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<BucketSummary[]> {
     if (mode === 'cloudflare' && creds) {
       const s3 = this.createS3Client(creds);
@@ -275,6 +612,34 @@ export class R2StorageEngine {
         totalBytes: 0,
         corsEnabled: true,
       }));
+    }
+
+    if (mode === 'local') {
+      const rootDir = await this.ensureLocalRoot(localRootPath);
+      const entries = await fs.readdir(rootDir, { withFileTypes: true });
+      const summaries: BucketSummary[] = [];
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.') || !BUCKET_NAME_REGEX.test(entry.name)) {
+          continue;
+        }
+        const bucketDir = path.join(rootDir, entry.name);
+        const meta = await this.readLocalBucketMeta(bucketDir);
+        const files = await this.walkLocalFiles(bucketDir);
+        const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+        summaries.push({
+          name: entry.name,
+          createdAt: meta.createdAt,
+          locationHint: meta.locationHint,
+          storageClass: meta.storageClass,
+          objectCount: files.length,
+          totalBytes,
+          publicDomain: meta.publicDomain,
+          corsEnabled: meta.corsEnabled,
+        });
+      }
+
+      return summaries.sort((a, b) => a.name.localeCompare(b.name));
     }
 
     return Array.from(this.sandboxBuckets.values())
@@ -305,6 +670,7 @@ export class R2StorageEngine {
     req: CreateBucketRequest,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<BucketSummary> {
     validateBucketName(req.name);
 
@@ -319,6 +685,40 @@ export class R2StorageEngine {
         objectCount: 0,
         totalBytes: 0,
         corsEnabled: false,
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(req.name, localRootPath, false);
+      const existing = await fs.stat(bucketDir).catch(() => null);
+      if (existing) {
+        throw new AppApiError({
+          status: 409,
+          errorCode: 'BUCKET_ALREADY_EXISTS',
+          title: 'Bucket Already Exists',
+          detail: `Bucket "${req.name}" already exists in the configured host folder.`,
+        });
+      }
+
+      await fs.mkdir(bucketDir, { recursive: true });
+      const meta: LocalBucketMeta = {
+        createdAt: new Date().toISOString(),
+        locationHint: req.locationHint || 'ENAM',
+        storageClass: req.storageClass || 'Standard',
+        corsEnabled: true,
+        folders: [],
+        objects: {},
+      };
+      await this.writeLocalBucketMeta(bucketDir, meta);
+
+      return {
+        name: req.name,
+        createdAt: meta.createdAt,
+        locationHint: meta.locationHint,
+        storageClass: meta.storageClass,
+        objectCount: 0,
+        totalBytes: 0,
+        corsEnabled: meta.corsEnabled,
       };
     }
 
@@ -357,6 +757,7 @@ export class R2StorageEngine {
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
     options?: { force?: boolean },
+    localRootPath?: string,
   ): Promise<{ deletedCount: number }> {
     const force = Boolean(options?.force);
 
@@ -404,6 +805,25 @@ export class R2StorageEngine {
       return { deletedCount };
     }
 
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const files = await this.walkLocalFiles(bucketDir);
+      const directChildren = await this.countLocalDirectChildren(bucketDir);
+      const existingCount = Math.max(files.length, directChildren);
+
+      if (directChildren > 0 && !force) {
+        throw new AppApiError({
+          status: 409,
+          errorCode: 'BUCKET_NOT_EMPTY',
+          title: 'Bucket Not Empty',
+          detail: `Bucket "${bucketName}" is not empty on disk (${existingCount} item(s)). Confirm its name to delete all contents.`,
+        });
+      }
+
+      await fs.rm(bucketDir, { recursive: true, force: true });
+      return { deletedCount: files.length };
+    }
+
     const bucket = this.sandboxBuckets.get(bucketName);
     if (!bucket) {
       throw new AppApiError({
@@ -435,6 +855,7 @@ export class R2StorageEngine {
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
     options?: { recursive?: boolean },
+    localRootPath?: string,
   ): Promise<{ prefix: string; deletedCount: number }> {
     const folderPrefix = validateFolderPrefix(rawPrefix);
     const recursive = Boolean(options?.recursive);
@@ -484,6 +905,46 @@ export class R2StorageEngine {
       return { prefix: folderPrefix, deletedCount: keysToDelete.length };
     }
 
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const segments = folderPrefix.split('/').filter(Boolean);
+      const folderDir = path.resolve(bucketDir, ...segments);
+      assertStrictlyInside(folderDir, bucketDir);
+
+      const stat = await fs.lstat(folderDir).catch(() => null);
+      let deletedCount = 0;
+      if (stat && stat.isDirectory()) {
+        const realFolder = await fs.realpath(folderDir);
+        assertStrictlyInside(realFolder, bucketDir);
+        const nestedFiles = await this.walkLocalFiles(realFolder, folderPrefix);
+        const directChildren = await this.countLocalDirectChildren(realFolder);
+
+        if (directChildren > 0 && !recursive) {
+          throw new AppApiError({
+            status: 409,
+            errorCode: 'FOLDER_NOT_EMPTY',
+            title: 'Folder Not Empty',
+            detail: `Folder "${folderPrefix}" is not empty (${Math.max(nestedFiles.length, directChildren)} nested item(s)). Confirm its path to delete all contents.`,
+          });
+        }
+
+        await fs.rm(realFolder, { recursive: true, force: true });
+        deletedCount = nestedFiles.length || 1;
+      }
+
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      const hadMarker = meta.folders.includes(folderPrefix);
+      meta.folders = meta.folders.filter((f) => !f.startsWith(folderPrefix));
+      for (const k of Object.keys(meta.objects)) {
+        if (k.startsWith(folderPrefix)) {
+          delete meta.objects[k];
+        }
+      }
+      await this.writeLocalBucketMeta(bucketDir, meta);
+
+      return { prefix: folderPrefix, deletedCount: deletedCount || (hadMarker ? 1 : 0) };
+    }
+
     const bucket = this.sandboxBuckets.get(bucketName);
     if (!bucket) {
       throw new AppApiError({
@@ -518,6 +979,7 @@ export class R2StorageEngine {
     rawPrefix: string,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<DirectoryListing> {
     const prefix = rawPrefix ? normalizePrefix(rawPrefix) : '';
 
@@ -569,6 +1031,83 @@ export class R2StorageEngine {
         totalObjectsInPrefix: objects.length,
         isTruncated: Boolean(res.IsTruncated),
         nextContinuationToken: res.NextContinuationToken,
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      let targetDir = bucketDir;
+      if (prefix) {
+        const segments = resolveSafeKeySegments(prefix);
+        targetDir = path.resolve(bucketDir, ...segments);
+        assertStrictlyInside(targetDir, bucketDir);
+      }
+
+      const dirStat = await fs.lstat(targetDir).catch(() => null);
+      if (!dirStat || !dirStat.isDirectory()) {
+        return {
+          bucket: bucketName,
+          prefix,
+          folders: [],
+          objects: [],
+          totalObjectsInPrefix: 0,
+          isTruncated: false,
+        };
+      }
+
+      const realTarget = await fs.realpath(targetDir);
+      if (realTarget !== bucketDir) {
+        assertStrictlyInside(realTarget, bucketDir);
+      }
+
+      const entries = await fs.readdir(realTarget, { withFileTypes: true });
+      const folders: DirectoryEntry[] = [];
+      const objects: R2ObjectItem[] = [];
+
+      for (const entry of entries) {
+        if (entry.name === LOCAL_META_FILENAME || entry.isSymbolicLink()) continue;
+        const fullPath = path.join(realTarget, entry.name);
+        if (entry.isDirectory()) {
+          const folderPrefix = `${prefix}${entry.name}/`;
+          folders.push({
+            prefix: folderPrefix,
+            name: entry.name,
+            hasMarkerObject: meta.folders.includes(folderPrefix),
+          });
+        } else if (entry.isFile()) {
+          const stat = await fs.stat(fullPath).catch(() => null);
+          if (!stat) continue;
+          const key = `${prefix}${entry.name}`;
+          const objMeta = meta.objects[key];
+          const contentType = objMeta?.contentType || inferMimeType(entry.name);
+          const etag = await this.computeLocalEtag(fullPath, stat.size, stat.mtimeMs);
+          objects.push({
+            bucket: bucketName,
+            key,
+            fileName: entry.name,
+            parentPrefix: prefix,
+            size: stat.size,
+            lastModified: stat.mtime.toISOString(),
+            etag,
+            contentType,
+            storageClass: objMeta?.storageClass || meta.storageClass,
+            isFolderMarker: false,
+            metadata: { ...(objMeta?.metadata ?? {}) },
+          });
+        }
+      }
+
+      folders.sort((a, b) => a.name.localeCompare(b.name));
+      objects.sort((a, b) => a.fileName.localeCompare(b.fileName));
+
+      return {
+        bucket: bucketName,
+        prefix,
+        folders,
+        objects,
+        totalObjectsInPrefix: objects.length,
+        isTruncated: false,
       };
     }
 
@@ -638,6 +1177,7 @@ export class R2StorageEngine {
     createMarkerObject: boolean,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<DirectoryEntry> {
     const folderPrefix = validateFolderPrefix(rawPrefix);
     const parts = folderPrefix.split('/').filter(Boolean);
@@ -656,6 +1196,24 @@ export class R2StorageEngine {
             DisablePayloadSigning: true,
           } as ConstructorParameters<typeof PutObjectCommand>[0]),
         );
+      }
+      return { prefix: folderPrefix, name, hasMarkerObject: createMarkerObject };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const folderDir = path.resolve(bucketDir, ...parts);
+      assertStrictlyInside(folderDir, bucketDir);
+      await fs.mkdir(folderDir, { recursive: true });
+      const realFolder = await fs.realpath(folderDir);
+      assertStrictlyInside(realFolder, bucketDir);
+
+      if (createMarkerObject) {
+        const meta = await this.readLocalBucketMeta(bucketDir);
+        if (!meta.folders.includes(folderPrefix)) {
+          meta.folders.push(folderPrefix);
+          await this.writeLocalBucketMeta(bucketDir, meta);
+        }
       }
       return { prefix: folderPrefix, name, hasMarkerObject: createMarkerObject };
     }
@@ -694,6 +1252,7 @@ export class R2StorageEngine {
     metadata: Record<string, string>,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<R2ObjectItem> {
     const cleanKey = key.replace(/^\/+/, '');
     if (!cleanKey) {
@@ -729,6 +1288,49 @@ export class R2StorageEngine {
         storageClass: 'Standard',
         isFolderMarker: cleanKey.endsWith('/'),
         metadata,
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const segments = resolveSafeKeySegments(cleanKey);
+      const targetPath = path.resolve(bucketDir, ...segments);
+      assertStrictlyInside(targetPath, bucketDir);
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      const realParent = await fs.realpath(path.dirname(targetPath));
+      if (realParent !== bucketDir) {
+        assertStrictlyInside(realParent, bucketDir);
+      }
+
+      await fs.writeFile(targetPath, content);
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      const resolvedMime =
+        contentType && contentType !== 'application/octet-stream'
+          ? contentType
+          : inferMimeType(segments[segments.length - 1]);
+      meta.objects[cleanKey] = {
+        contentType: resolvedMime,
+        metadata: { ...metadata },
+        storageClass: meta.storageClass,
+      };
+      await this.writeLocalBucketMeta(bucketDir, meta);
+
+      const stat = await fs.stat(targetPath);
+      const etag = `"${crypto.createHash('md5').update(content).digest('hex')}"`;
+      const lastSlash = cleanKey.lastIndexOf('/');
+      return {
+        bucket: bucketName,
+        key: cleanKey,
+        fileName: lastSlash >= 0 ? cleanKey.slice(lastSlash + 1) : cleanKey,
+        parentPrefix: lastSlash >= 0 ? cleanKey.slice(0, lastSlash + 1) : '',
+        size: content.byteLength,
+        lastModified: stat.mtime.toISOString(),
+        etag,
+        contentType: resolvedMime,
+        storageClass: meta.storageClass,
+        isFolderMarker: false,
+        metadata: { ...metadata },
       };
     }
 
@@ -775,6 +1377,7 @@ export class R2StorageEngine {
     key: string,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<ObjectPreviewResponse> {
     if (mode === 'cloudflare' && creds) {
       const s3 = this.createS3Client(creds);
@@ -794,6 +1397,43 @@ export class R2StorageEngine {
           ? `data:${contentType};base64,${bytes.toString('base64')}`
           : undefined,
         metadata: head.Metadata ?? {},
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const segments = resolveSafeKeySegments(key);
+      const targetPath = path.resolve(bucketDir, ...segments);
+      assertStrictlyInside(targetPath, bucketDir);
+
+      const stat = await fs.lstat(targetPath).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        throw new AppApiError({
+          status: 404,
+          errorCode: 'OBJECT_NOT_FOUND',
+          title: 'Object Not Found',
+          detail: `Object "${key}" was not found in bucket "${bucketName}".`,
+        });
+      }
+      const realTarget = await fs.realpath(targetPath);
+      assertStrictlyInside(realTarget, bucketDir);
+
+      const bytes = await fs.readFile(realTarget);
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      const objMeta = meta.objects[key];
+      const contentType = objMeta?.contentType || inferMimeType(segments[segments.length - 1]);
+      const isText = isTextMime(contentType, key);
+      return {
+        bucket: bucketName,
+        key,
+        contentType,
+        size: bytes.byteLength,
+        isText,
+        textContent: isText ? bytes.subarray(0, 64 * 1024).toString('utf-8') : undefined,
+        dataUrl: contentType.startsWith('image/')
+          ? `data:${contentType};base64,${bytes.toString('base64')}`
+          : undefined,
+        metadata: { ...(objMeta?.metadata ?? {}) },
       };
     }
 
@@ -828,6 +1468,7 @@ export class R2StorageEngine {
     key: string,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
     if (mode === 'cloudflare' && creds) {
       const s3 = this.createS3Client(creds);
@@ -835,6 +1476,31 @@ export class R2StorageEngine {
       const buffer = obj.Body ? Buffer.from(await obj.Body.transformToByteArray()) : Buffer.alloc(0);
       const fileName = key.split('/').pop() || 'download.bin';
       return { buffer, contentType: obj.ContentType || 'application/octet-stream', fileName };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const segments = resolveSafeKeySegments(key);
+      const targetPath = path.resolve(bucketDir, ...segments);
+      assertStrictlyInside(targetPath, bucketDir);
+
+      const stat = await fs.lstat(targetPath).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        throw new AppApiError({
+          status: 404,
+          errorCode: 'OBJECT_NOT_FOUND',
+          title: 'Object Not Found',
+          detail: `Object "${key}" does not exist in "${bucketName}".`,
+        });
+      }
+      const realTarget = await fs.realpath(targetPath);
+      assertStrictlyInside(realTarget, bucketDir);
+
+      const buffer = await fs.readFile(realTarget);
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      const fileName = segments[segments.length - 1] || 'download.bin';
+      const contentType = meta.objects[key]?.contentType || inferMimeType(fileName);
+      return { buffer, contentType, fileName };
     }
 
     const bucket = this.sandboxBuckets.get(bucketName);
@@ -857,6 +1523,7 @@ export class R2StorageEngine {
     expiresInSeconds: number,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<PresignedUrlResponse> {
     const safeTtl = Math.min(Math.max(expiresInSeconds || 900, 60), 604800);
     const expiresAt = new Date(Date.now() + safeTtl * 1000).toISOString();
@@ -868,6 +1535,30 @@ export class R2StorageEngine {
         new GetObjectCommand({ Bucket: bucketName, Key: key }),
         { expiresIn: safeTtl },
       );
+      return { bucket: bucketName, key, url, expiresAt, expiresInSeconds: safeTtl };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(bucketName, localRootPath, true);
+      const segments = resolveSafeKeySegments(key);
+      const targetPath = path.resolve(bucketDir, ...segments);
+      assertStrictlyInside(targetPath, bucketDir);
+
+      const stat = await fs.lstat(targetPath).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        throw new AppApiError({
+          status: 404,
+          errorCode: 'OBJECT_NOT_FOUND',
+          title: 'Object Not Found',
+          detail: `Cannot generate presigned URL: "${key}" not found in "${bucketName}".`,
+        });
+      }
+
+      const sig = crypto.createHash('sha256').update(`local:${bucketName}:${key}:${expiresAt}`).digest('hex').slice(0, 32);
+      const url = `https://local-host.r2.storage/${encodeURIComponent(bucketName)}/${key
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=${safeTtl}&X-Amz-Signature=${sig}`;
       return { bucket: bucketName, key, url, expiresAt, expiresInSeconds: safeTtl };
     }
 
@@ -894,6 +1585,7 @@ export class R2StorageEngine {
     request: SearchRequest,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<SearchResponse> {
     const started = performance.now();
     const q = (request.query ?? '').trim().toLowerCase();
@@ -946,6 +1638,95 @@ export class R2StorageEngine {
         bucketsScanned,
         elapsedMs: Math.round(performance.now() - started),
         results,
+      };
+    }
+
+    if (mode === 'local') {
+      const rootDir = await this.ensureLocalRoot(localRootPath);
+      const bucketNames: string[] = [];
+      if (request.bucket) {
+        validateBucketName(request.bucket);
+        const stat = await fs.lstat(path.join(rootDir, request.bucket)).catch(() => null);
+        if (stat?.isDirectory()) bucketNames.push(request.bucket);
+      } else {
+        const entries = await fs.readdir(rootDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.') && BUCKET_NAME_REGEX.test(entry.name)) {
+            bucketNames.push(entry.name);
+          }
+        }
+      }
+
+      for (const bName of bucketNames) {
+        bucketsScanned += 1;
+        const bucketDir = path.join(rootDir, bName);
+        const meta = await this.readLocalBucketMeta(bucketDir);
+        const files = await this.walkLocalFiles(bucketDir);
+
+        for (const file of files) {
+          const objMeta = meta.objects[file.key];
+          const contentType = objMeta?.contentType || inferMimeType(file.key);
+          const metadata = objMeta?.metadata ?? {};
+
+          if (contentTypeFilter && !contentType.toLowerCase().includes(contentTypeFilter)) {
+            continue;
+          }
+
+          const lastSlash = file.key.lastIndexOf('/');
+          const fileName = lastSlash >= 0 ? file.key.slice(lastSlash + 1) : file.key;
+          const matchedOn = new Set<SearchResultItem['matchedOn'][number]>();
+
+          if (q) {
+            if (fileName.toLowerCase().includes(q)) matchedOn.add('fileName');
+            if (file.key.toLowerCase().includes(q)) matchedOn.add('key');
+            for (const [mk, mv] of Object.entries(metadata)) {
+              if (mk.toLowerCase().includes(q)) matchedOn.add('metadataKey');
+              if (mv.toLowerCase().includes(q)) matchedOn.add('metadataValue');
+            }
+            if (matchedOn.size === 0) continue;
+          }
+
+          if (tagKey || tagValue) {
+            let tagMatched = false;
+            for (const [mk, mv] of Object.entries(metadata)) {
+              const kMatch = !tagKey || mk.toLowerCase().includes(tagKey);
+              const vMatch = !tagValue || mv.toLowerCase().includes(tagValue);
+              if (kMatch && vMatch) {
+                tagMatched = true;
+                if (tagKey) matchedOn.add('metadataKey');
+                if (tagValue) matchedOn.add('metadataValue');
+              }
+            }
+            if (!tagMatched) continue;
+          }
+
+          if (!q && !tagKey && !tagValue) {
+            matchedOn.add('key');
+          }
+
+          results.push({
+            bucket: bName,
+            key: file.key,
+            fileName,
+            parentPrefix: lastSlash >= 0 ? file.key.slice(0, lastSlash + 1) : '',
+            size: file.size,
+            lastModified: new Date(file.mtimeMs).toISOString(),
+            etag: await this.computeLocalEtag(file.fullPath, file.size, file.mtimeMs),
+            contentType,
+            storageClass: objMeta?.storageClass || meta.storageClass,
+            isFolderMarker: false,
+            metadata: { ...metadata },
+            matchedOn: Array.from(matchedOn),
+          });
+        }
+      }
+
+      return {
+        query: request,
+        totalMatches: results.length,
+        bucketsScanned,
+        elapsedMs: Math.max(1, Math.round(performance.now() - started)),
+        results: results.sort((a, b) => a.key.localeCompare(b.key)),
       };
     }
 
@@ -1023,6 +1804,7 @@ export class R2StorageEngine {
     req: BulkDeleteRequest,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<BulkOperationResult> {
     const started = performance.now();
     if (!req.keys || req.keys.length === 0) {
@@ -1048,6 +1830,83 @@ export class R2StorageEngine {
         errorCode: e.Code ?? 'S3_DELETE_ERROR',
         reason: e.Message ?? 'Failed to delete key',
       }));
+      return {
+        operation: 'delete',
+        requestedCount: req.keys.length,
+        succeededCount: succeededKeys.length,
+        failedCount: failures.length,
+        succeededKeys,
+        failures,
+        elapsedMs: Math.max(1, Math.round(performance.now() - started)),
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir } = await this.resolveLocalBucketDir(req.bucket, localRootPath, true);
+      const meta = await this.readLocalBucketMeta(bucketDir);
+      const succeededKeys: string[] = [];
+      const failures: BulkItemFailure[] = [];
+
+      for (const rawKey of req.keys) {
+        try {
+          if (rawKey.endsWith('/') && req.recursiveFolders) {
+            const folderPrefix = validateFolderPrefix(rawKey);
+            const segments = folderPrefix.split('/').filter(Boolean);
+            const folderDir = path.resolve(bucketDir, ...segments);
+            assertStrictlyInside(folderDir, bucketDir);
+            const stat = await fs.lstat(folderDir).catch(() => null);
+            let deletedAny = false;
+            if (stat?.isDirectory()) {
+              const nested = await this.walkLocalFiles(folderDir, folderPrefix);
+              await fs.rm(folderDir, { recursive: true, force: true });
+              for (const nf of nested) succeededKeys.push(nf.key);
+              if (nested.length === 0) succeededKeys.push(folderPrefix);
+              deletedAny = true;
+            }
+            if (meta.folders.includes(folderPrefix)) {
+              meta.folders = meta.folders.filter((f) => !f.startsWith(folderPrefix));
+              deletedAny = true;
+            }
+            for (const mk of Object.keys(meta.objects)) {
+              if (mk.startsWith(folderPrefix)) {
+                delete meta.objects[mk];
+              }
+            }
+            if (!deletedAny) {
+              failures.push({
+                key: rawKey,
+                errorCode: 'OBJECT_NOT_FOUND',
+                reason: `Folder prefix "${rawKey}" contained no matching objects.`,
+              });
+            }
+          } else {
+            const segments = resolveSafeKeySegments(rawKey);
+            const targetPath = path.resolve(bucketDir, ...segments);
+            assertStrictlyInside(targetPath, bucketDir);
+            const stat = await fs.lstat(targetPath).catch(() => null);
+            if (!stat || !stat.isFile()) {
+              failures.push({
+                key: rawKey,
+                errorCode: 'OBJECT_NOT_FOUND',
+                reason: `Key "${rawKey}" does not exist in "${req.bucket}".`,
+              });
+              continue;
+            }
+            await fs.unlink(targetPath);
+            delete meta.objects[rawKey];
+            succeededKeys.push(rawKey);
+          }
+        } catch (err) {
+          failures.push({
+            key: rawKey,
+            errorCode: err instanceof AppApiError ? err.errorCode : 'LOCAL_DELETE_FAILED',
+            reason: err instanceof Error ? err.message : 'Failed to delete local object.',
+          });
+        }
+      }
+
+      await this.writeLocalBucketMeta(bucketDir, meta);
+
       return {
         operation: 'delete',
         requestedCount: req.keys.length,
@@ -1116,6 +1975,7 @@ export class R2StorageEngine {
     req: BulkMoveRequest,
     mode: ConnectionMode,
     creds?: CloudflareCredentials,
+    localRootPath?: string,
   ): Promise<BulkOperationResult> {
     const started = performance.now();
     if (!req.keys || req.keys.length === 0) {
@@ -1159,6 +2019,102 @@ export class R2StorageEngine {
             reason: err instanceof Error ? err.message : 'Move failed',
           });
         }
+      }
+
+      return {
+        operation: 'move',
+        requestedCount: req.keys.length,
+        succeededCount: succeededKeys.length,
+        failedCount: failures.length,
+        succeededKeys,
+        failures,
+        elapsedMs: Math.max(1, Math.round(performance.now() - started)),
+      };
+    }
+
+    if (mode === 'local') {
+      const { bucketDir: srcBucketDir } = await this.resolveLocalBucketDir(
+        req.sourceBucket,
+        localRootPath,
+        true,
+      );
+      const { bucketDir: dstBucketDir } = await this.resolveLocalBucketDir(
+        req.destinationBucket,
+        localRootPath,
+        true,
+      );
+      const srcMeta = await this.readLocalBucketMeta(srcBucketDir);
+      const dstMeta =
+        srcBucketDir === dstBucketDir ? srcMeta : await this.readLocalBucketMeta(dstBucketDir);
+
+      const succeededKeys: string[] = [];
+      const failures: BulkItemFailure[] = [];
+
+      for (const sourceKey of req.keys) {
+        try {
+          const srcSegments = resolveSafeKeySegments(sourceKey);
+          const srcPath = path.resolve(srcBucketDir, ...srcSegments);
+          assertStrictlyInside(srcPath, srcBucketDir);
+          const srcStat = await fs.lstat(srcPath).catch(() => null);
+          if (!srcStat || !srcStat.isFile()) {
+            failures.push({
+              key: sourceKey,
+              errorCode: 'OBJECT_NOT_FOUND',
+              reason: `Source key "${sourceKey}" not found in "${req.sourceBucket}".`,
+            });
+            continue;
+          }
+
+          const fileName = srcSegments[srcSegments.length - 1];
+          const targetKey = `${destPrefix}${fileName}`;
+          const dstSegments = resolveSafeKeySegments(targetKey);
+          const dstPath = path.resolve(dstBucketDir, ...dstSegments);
+          assertStrictlyInside(dstPath, dstBucketDir);
+
+          if (targetKey === sourceKey && req.destinationBucket === req.sourceBucket) {
+            failures.push({
+              key: sourceKey,
+              errorCode: 'BULK_SAME_LOCATION',
+              reason: 'Source and destination keys are identical.',
+            });
+            continue;
+          }
+
+          const dstExists = await fs.stat(dstPath).catch(() => null);
+          if (dstExists && !req.overwrite) {
+            failures.push({
+              key: sourceKey,
+              errorCode: 'BULK_DESTINATION_CONFLICT',
+              reason: `Target "${targetKey}" already exists and overwrite is disabled.`,
+            });
+            continue;
+          }
+
+          await fs.mkdir(path.dirname(dstPath), { recursive: true });
+          const bytes = await fs.readFile(srcPath);
+          await fs.writeFile(dstPath, bytes);
+          await fs.unlink(srcPath);
+
+          const srcEntryMeta = srcMeta.objects[sourceKey];
+          dstMeta.objects[targetKey] = {
+            contentType: srcEntryMeta?.contentType || inferMimeType(fileName),
+            metadata: { ...(srcEntryMeta?.metadata ?? {}) },
+            storageClass: dstMeta.storageClass,
+          };
+          delete srcMeta.objects[sourceKey];
+          succeededKeys.push(targetKey);
+        } catch (err) {
+          failures.push({
+            key: sourceKey,
+            errorCode: err instanceof AppApiError ? err.errorCode : 'LOCAL_MOVE_FAILED',
+            reason: err instanceof Error ? err.message : 'Local move failed.',
+          });
+        }
+      }
+
+      await this.writeLocalBucketMeta(srcBucketDir, srcMeta);
+      if (dstBucketDir !== srcBucketDir) {
+        await this.writeLocalBucketMeta(dstBucketDir, dstMeta);
       }
 
       return {
@@ -1238,6 +2194,26 @@ export class R2StorageEngine {
       elapsedMs: Math.max(1, Math.round(performance.now() - started)),
     };
   }
+}
+
+function inferMimeType(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.json')) return 'application/json';
+  if (lower.endsWith('.ndjson')) return 'application/x-ndjson';
+  if (lower.endsWith('.toml')) return 'application/toml';
+  if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'application/yaml';
+  if (lower.endsWith('.xml')) return 'application/xml';
+  if (lower.endsWith('.md')) return 'text/markdown';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
+  if (lower.endsWith('.css')) return 'text/css';
+  if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'application/javascript';
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'text/typescript';
+  if (lower.endsWith('.svg')) return 'image/svg+xml';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.txt') || lower.endsWith('.log') || lower.endsWith('.csv')) return 'text/plain';
+  return 'application/octet-stream';
 }
 
 function isTextMime(contentType: string, key: string): boolean {

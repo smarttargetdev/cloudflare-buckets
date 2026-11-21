@@ -110,24 +110,48 @@ export function BucketsExplorer({
   const [forceConfirmInput, setForceConfirmInput] = useState('');
   const [forceDeleting, setForceDeleting] = useState(false);
 
+  const selectedBucketRef = useRef(selectedBucket);
+  selectedBucketRef.current = selectedBucket;
+
   const loadBuckets = useCallback(async () => {
     setLoadingBuckets(true);
     setError(null);
     try {
       const list = await apiClient.listBuckets();
       setBuckets(list);
-      if (list.length > 0 && !list.some((b) => b.name === selectedBucket)) {
+      const activeName = selectedBucketRef.current;
+      if (list.length === 0) {
+        onSelectBucket('');
+        onChangePrefix('');
+        setListing(null);
+        setSelectedKeys(new Set());
+        setPreview(null);
+        setPresigned(null);
+      } else if (!list.some((b) => b.name === activeName)) {
         onSelectBucket(list[0].name);
+        onChangePrefix('');
+        setListing(null);
+        setSelectedKeys(new Set());
+        setPreview(null);
+        setPresigned(null);
       }
     } catch (err) {
+      setBuckets([]);
+      setListing(null);
       setError(err as ParsedClientError);
     } finally {
       setLoadingBuckets(false);
     }
-  }, [selectedBucket, onSelectBucket]);
+  }, [onSelectBucket, onChangePrefix]);
 
   const loadDirectory = useCallback(async () => {
-    if (!selectedBucket) return;
+    if (!selectedBucket || buckets.length === 0 || !buckets.some((b) => b.name === selectedBucket)) {
+      if (!selectedBucket || buckets.length === 0) {
+        setListing(null);
+        setSelectedKeys(new Set());
+      }
+      return;
+    }
     setLoadingDir(true);
     setError(null);
     try {
@@ -139,7 +163,21 @@ export function BucketsExplorer({
     } finally {
       setLoadingDir(false);
     }
-  }, [selectedBucket, currentPrefix]);
+  }, [selectedBucket, currentPrefix, buckets]);
+
+  const handleRefreshAll = async () => {
+    await loadBuckets();
+    await loadDirectory();
+  };
+
+  useEffect(() => {
+    setListing(null);
+    setSelectedKeys(new Set());
+    setPreview(null);
+    setPresigned(null);
+    setUploadNotice(null);
+    setBulkReport(null);
+  }, [connectionVersion]);
 
   useEffect(() => {
     loadBuckets();
@@ -174,6 +212,10 @@ export function BucketsExplorer({
       await apiClient.deleteBucket(bucketName, false);
       if (selectedBucket === bucketName) {
         onChangePrefix('');
+        setListing(null);
+        setSelectedKeys(new Set());
+        setPreview(null);
+        setPresigned(null);
       }
       await loadBuckets();
     } catch (err) {
@@ -216,6 +258,10 @@ export function BucketsExplorer({
         await apiClient.deleteBucket(forceDeleteTarget.target, true);
         if (selectedBucket === forceDeleteTarget.target) {
           onChangePrefix('');
+          setListing(null);
+          setSelectedKeys(new Set());
+          setPreview(null);
+          setPresigned(null);
         }
         setForceDeleteTarget(null);
         setForceConfirmInput('');
@@ -576,7 +622,7 @@ export function BucketsExplorer({
           <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={loadBuckets}
+              onClick={handleRefreshAll}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
             >
               <RefreshCw className="h-3.5 w-3.5" />

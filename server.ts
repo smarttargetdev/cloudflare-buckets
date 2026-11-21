@@ -17,8 +17,9 @@ const PORT = 3000;
 function extractConnectionContext(req: Request): {
   mode: ConnectionMode;
   creds?: CloudflareCredentials;
+  localFolderPath?: string;
 } {
-  const modeHeader = req.header('x-buckets-mode');
+  const modeHeader = req.header('x-buckets-mode') ?? (typeof req.query.mode === 'string' ? req.query.mode : undefined);
   if (modeHeader === 'cloudflare') {
     const creds: CloudflareCredentials = {
       accountId: req.header('x-cf-account-id') ?? '',
@@ -27,6 +28,12 @@ function extractConnectionContext(req: Request): {
       secretAccessKey: req.header('x-r2-secret-key') ?? '',
     };
     return { mode: 'cloudflare', creds };
+  }
+  if (modeHeader === 'local') {
+    const headerPath = req.header('x-buckets-local-path');
+    const queryPath = typeof req.query.localPath === 'string' ? req.query.localPath : undefined;
+    const localFolderPath = headerPath ?? queryPath ?? process.env.BUCKETS_LOCAL_FOLDER;
+    return { mode: 'local', localFolderPath };
   }
   return { mode: 'sandbox' };
 }
@@ -100,11 +107,22 @@ async function startServer() {
     });
   });
 
+  app.post('/api/local-storage/inspect', async (req, res, next) => {
+    try {
+      const folderPath = typeof req.body?.path === 'string' ? req.body.path : '';
+      const createIfMissing = req.body?.createIfMissing !== false;
+      const result = await engine.inspectLocalFolder(folderPath, createIfMissing);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get('/api/buckets', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       await instrument(req, res, 'ListBuckets', async () => {
-        const buckets = await engine.listBuckets(mode, creds);
+        const buckets = await engine.listBuckets(mode, creds, localFolderPath);
         return {
           payload: buckets,
           bytes: JSON.stringify(buckets).length,
@@ -118,9 +136,9 @@ async function startServer() {
 
   app.post('/api/buckets', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       await instrument(req, res, 'CreateBucket', async () => {
-        const bucket = await engine.createBucket(req.body, mode, creds);
+        const bucket = await engine.createBucket(req.body, mode, creds, localFolderPath);
         return {
           payload: bucket,
           bucket: bucket.name,
@@ -134,11 +152,11 @@ async function startServer() {
 
   app.delete('/api/buckets/:bucket', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const force = req.query.force === 'true' || req.body?.force === true;
       await instrument(req, res, 'DeleteBucket', async () => {
-        const result = await engine.deleteBucket(bucketName, mode, creds, { force });
+        const result = await engine.deleteBucket(bucketName, mode, creds, { force }, localFolderPath);
         return {
           payload: { deleted: true, bucket: bucketName, deletedCount: result.deletedCount },
           bucket: bucketName,
@@ -154,11 +172,11 @@ async function startServer() {
 
   app.get('/api/buckets/:bucket/objects', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : '';
       await instrument(req, res, 'ListObjectsV2', async () => {
-        const listing = await engine.listDirectory(bucketName, prefix, mode, creds);
+        const listing = await engine.listDirectory(bucketName, prefix, mode, creds, localFolderPath);
         return {
           payload: listing,
           bucket: bucketName,
@@ -173,11 +191,11 @@ async function startServer() {
 
   app.post('/api/buckets/:bucket/folders', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const { prefix, createMarkerObject = true } = req.body ?? {};
       await instrument(req, res, 'CreateFolderMarker', async () => {
-        const folder = await engine.createFolder(bucketName, prefix, createMarkerObject, mode, creds);
+        const folder = await engine.createFolder(bucketName, prefix, createMarkerObject, mode, creds, localFolderPath);
         return {
           payload: folder,
           bucket: bucketName,
@@ -192,12 +210,12 @@ async function startServer() {
 
   app.delete('/api/buckets/:bucket/folders', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : String(req.body?.prefix ?? '');
       const recursive = req.query.recursive === 'true' || req.body?.recursive === true;
       await instrument(req, res, 'BulkDelete', async () => {
-        const result = await engine.deleteFolder(bucketName, prefix, mode, creds, { recursive });
+        const result = await engine.deleteFolder(bucketName, prefix, mode, creds, { recursive }, localFolderPath);
         return {
           payload: { deleted: true, bucket: bucketName, prefix: result.prefix, deletedCount: result.deletedCount },
           bucket: bucketName,
@@ -212,7 +230,7 @@ async function startServer() {
 
   app.post('/api/buckets/:bucket/objects/upload', upload.single('file'), async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const file = req.file;
       if (!file) {
@@ -245,6 +263,7 @@ async function startServer() {
           metadata,
           mode,
           creds,
+          localFolderPath,
         );
         return {
           payload: created,
@@ -261,7 +280,7 @@ async function startServer() {
 
   app.put('/api/buckets/:bucket/objects/content', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const { key, content = '', contentType = 'text/plain', metadata = {} } = req.body ?? {};
       if (typeof key !== 'string' || !key.trim()) {
@@ -282,6 +301,7 @@ async function startServer() {
           metadata,
           mode,
           creds,
+          localFolderPath,
         );
         return {
           payload: saved,
@@ -298,11 +318,11 @@ async function startServer() {
 
   app.get('/api/buckets/:bucket/objects/preview', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const key = typeof req.query.key === 'string' ? req.query.key : '';
       await instrument(req, res, 'GetObject', async () => {
-        const preview = await engine.getObjectPreview(bucketName, key, mode, creds);
+        const preview = await engine.getObjectPreview(bucketName, key, mode, creds, localFolderPath);
         return {
           payload: preview,
           bucket: bucketName,
@@ -320,10 +340,10 @@ async function startServer() {
     const started = performance.now();
     const traceId = res.locals.traceId as string;
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const key = typeof req.query.key === 'string' ? req.query.key : '';
-      const file = await engine.getObjectBuffer(bucketName, key, mode, creds);
+      const file = await engine.getObjectBuffer(bucketName, key, mode, creds, localFolderPath);
       const durationMs = Math.max(1, Math.round(performance.now() - started));
       telemetry.recordOperation({
         operation: 'GetObject',
@@ -345,11 +365,11 @@ async function startServer() {
 
   app.post('/api/buckets/:bucket/objects/presign', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const bucketName = req.params.bucket;
       const { key, expiresInSeconds = 900 } = req.body ?? {};
       await instrument(req, res, 'PresignUrl', async () => {
-        const result = await engine.presignUrl(bucketName, key, expiresInSeconds, mode, creds);
+        const result = await engine.presignUrl(bucketName, key, expiresInSeconds, mode, creds, localFolderPath);
         return {
           payload: result,
           bucket: bucketName,
@@ -364,7 +384,7 @@ async function startServer() {
 
   app.get('/api/search', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       const searchReq = {
         query: typeof req.query.q === 'string' ? req.query.q : undefined,
         bucket: typeof req.query.bucket === 'string' && req.query.bucket ? req.query.bucket : undefined,
@@ -373,7 +393,7 @@ async function startServer() {
         contentType: typeof req.query.contentType === 'string' ? req.query.contentType : undefined,
       };
       await instrument(req, res, 'SearchObjects', async () => {
-        const result = await engine.searchObjects(searchReq, mode, creds);
+        const result = await engine.searchObjects(searchReq, mode, creds, localFolderPath);
         return {
           payload: result,
           bucket: searchReq.bucket,
@@ -388,9 +408,9 @@ async function startServer() {
 
   app.post('/api/objects/bulk-delete', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       await instrument(req, res, 'BulkDelete', async () => {
-        const result = await engine.bulkDelete(req.body, mode, creds);
+        const result = await engine.bulkDelete(req.body, mode, creds, localFolderPath);
         return {
           payload: result,
           bucket: req.body?.bucket,
@@ -404,9 +424,9 @@ async function startServer() {
 
   app.post('/api/objects/bulk-move', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
       await instrument(req, res, 'BulkMove', async () => {
-        const result = await engine.bulkMove(req.body, mode, creds);
+        const result = await engine.bulkMove(req.body, mode, creds, localFolderPath);
         return {
           payload: result,
           bucket: req.body?.destinationBucket,
@@ -420,8 +440,8 @@ async function startServer() {
 
   app.get('/api/telemetry/metrics', async (req, res, next) => {
     try {
-      const { mode, creds } = extractConnectionContext(req);
-      const buckets = await engine.listBuckets(mode, creds).catch(() => []);
+      const { mode, creds, localFolderPath } = extractConnectionContext(req);
+      const buckets = await engine.listBuckets(mode, creds, localFolderPath).catch(() => []);
       res.json(telemetry.getMetricsSnapshot(buckets));
     } catch (err) {
       next(err);

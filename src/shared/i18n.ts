@@ -55,6 +55,8 @@ export interface TranslationCatalog {
     r2Connected: string;
     r2Credentials: string;
     sandboxLocal: string;
+    localFolder: string;
+    localFolderConnected: string;
     cloudflareR2: string;
     shortcutHint: string;
     lightThemeAria: string;
@@ -313,9 +315,19 @@ export interface TranslationCatalog {
     closeAria: string;
     executionModeLabel: string;
     sandboxLocal: string;
+    localFolder: string;
     cloudflareReal: string;
     sandboxDesc: string;
+    localFolderDesc: string;
     cloudflareDesc: string;
+    localFolderPathLabel: string;
+    localFolderPathPlaceholder: string;
+    localFolderQuickPreset: string;
+    localFolderVerify: string;
+    localFolderVerifying: string;
+    localFolderVerified: string;
+    localFolderMissing: string;
+    localFolderNote: string;
     accountIdLabel: string;
     accountIdPlaceholder: string;
     accessKeyLabel: string;
@@ -365,7 +377,9 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       r2Connected: 'R2 Conectado',
       r2Credentials: 'Credenciais R2',
       sandboxLocal: 'Sandbox Local',
-      cloudflareR2: 'Cloudflare R2',
+      localFolder: 'Pasta Local (Host)',
+      localFolderConnected: 'Pasta Local Conectada',
+      cloudflareR2: 'Cloudflare Server',
       shortcutHint: 'Ctrl+B Sistema de Arquivos · Ctrl+K Busca · Alt+C Editor',
       lightThemeAria: 'Ativar tema claro',
       darkThemeAria: 'Ativar tema escuro',
@@ -623,9 +637,19 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       closeAria: 'Fechar painel de credenciais',
       executionModeLabel: 'Modo de Execução',
       sandboxLocal: 'Sandbox Local',
-      cloudflareReal: 'Cloudflare R2 Real',
+      localFolder: 'Pasta Local',
+      cloudflareReal: 'Cloudflare Server',
       sandboxDesc: 'O Sandbox Local simula o SDK oficial S3, diretórios virtuais, busca por tags e operações em lote instantaneamente no servidor.',
+      localFolderDesc: 'Armazena buckets como subdiretórios reais e objetos diretamente como arquivos dentro de uma pasta no host.',
       cloudflareDesc: 'Conecta diretamente ao endpoint S3 https://<accountId>.r2.cloudflarestorage.com usando suas chaves da sessão.',
+      localFolderPathLabel: 'Caminho da Pasta no Host',
+      localFolderPathPlaceholder: 'ex: ./data/buckets ou /tmp/cloudflare-buckets',
+      localFolderQuickPreset: 'Usar ./data/buckets',
+      localFolderVerify: 'Validar / Preparar Pasta',
+      localFolderVerifying: 'Validando...',
+      localFolderVerified: 'Pasta pronta em {path} · {count} bucket(s) encontrado(s)',
+      localFolderMissing: 'Informe o caminho da pasta no host para conectar o armazenamento local.',
+      localFolderNote: 'Buckets e arquivos são persistidos diretamente em disco na pasta configurada com isolamento estrito de diretório.',
       accountIdLabel: 'Cloudflare Account ID',
       accountIdPlaceholder: 'ex: 8f9c2a1b3d4e5f6a7b8c9d0e1f2a3b4c',
       accessKeyLabel: 'R2 Access Key ID',
@@ -635,7 +659,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       apiTokenLabel: 'Cloudflare API Token (Opcional · Admin REST)',
       apiTokenPlaceholder: 'Bearer Token com permissão Workers R2 Storage:Edit',
       securityNote: 'As credenciais permanecem apenas na memória desta sessão e são enviadas por cabeçalho TLS ao backend.',
-      validationMissing: 'Informe Account ID, R2 Access Key ID e Secret Access Key para conectar ao Cloudflare R2.',
+      validationMissing: 'Informe Account ID, R2 Access Key ID e Secret Access Key para conectar ao Cloudflare Server.',
       cancel: 'Cancelar',
       apply: 'Aplicar Conexão',
     },
@@ -664,6 +688,9 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
         CLOUDFLARE_ENDPOINT_ERROR: 'Não foi possível comunicar com o endpoint S3 do Cloudflare R2.',
         UPLOAD_FILE_REQUIRED: 'Selecione ou arraste pelo menos um arquivo para enviar.',
         NETWORK_UNREACHABLE: 'Falha de conexão com a API. Verifique se o servidor está acessível.',
+        LOCAL_FOLDER_INVALID: 'Caminho de pasta local inválido. Informe um diretório válido no host.',
+        LOCAL_FOLDER_SYSTEM_RESTRICTED: 'Diretórios protegidos do sistema não podem ser usados como raiz de buckets.',
+        LOCAL_FOLDER_UNREACHABLE: 'Não foi possível acessar ou gravar na pasta local especificada no host.',
       },
       invalidJsonPrefix: 'JSON inválido: {message}',
       invalidJsonGeneric: 'JSON inválido.',
@@ -687,7 +714,9 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       r2Connected: 'R2 Connected',
       r2Credentials: 'R2 Credentials',
       sandboxLocal: 'Local Sandbox',
-      cloudflareR2: 'Cloudflare R2',
+      localFolder: 'Local Folder (Host)',
+      localFolderConnected: 'Local Folder Connected',
+      cloudflareR2: 'Cloudflare Server',
       shortcutHint: 'Ctrl+B File System · Ctrl+K Search · Alt+C Editor',
       lightThemeAria: 'Switch to light theme',
       darkThemeAria: 'Switch to dark theme',
@@ -945,9 +974,19 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       closeAria: 'Close credentials drawer',
       executionModeLabel: 'Execution Mode',
       sandboxLocal: 'Local Sandbox',
-      cloudflareReal: 'Live Cloudflare R2',
+      localFolder: 'Local Folder',
+      cloudflareReal: 'Cloudflare Server',
       sandboxDesc: 'Local Sandbox simulates the official S3 SDK, virtual directories, metadata search, and bulk operations instantly on the server.',
+      localFolderDesc: 'Stores buckets as real subdirectories and objects directly as files inside a host folder.',
       cloudflareDesc: 'Connects directly to https://<accountId>.r2.cloudflarestorage.com using your session credentials.',
+      localFolderPathLabel: 'Host Folder Path',
+      localFolderPathPlaceholder: 'e.g. ./data/buckets or /tmp/cloudflare-buckets',
+      localFolderQuickPreset: 'Use ./data/buckets',
+      localFolderVerify: 'Validate / Prepare Folder',
+      localFolderVerifying: 'Validating...',
+      localFolderVerified: 'Folder ready at {path} · {count} bucket(s) found',
+      localFolderMissing: 'Provide a host folder path to connect local storage.',
+      localFolderNote: 'Buckets and files are persisted directly on disk inside the configured host folder with strict path confinement.',
       accountIdLabel: 'Cloudflare Account ID',
       accountIdPlaceholder: 'e.g. 8f9c2a1b3d4e5f6a7b8c9d0e1f2a3b4c',
       accessKeyLabel: 'R2 Access Key ID',
@@ -957,7 +996,7 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
       apiTokenLabel: 'Cloudflare API Token (Optional · Admin REST)',
       apiTokenPlaceholder: 'Bearer Token with Workers R2 Storage:Edit scope',
       securityNote: 'Credentials stay in session memory only and are forwarded over TLS headers to the backend.',
-      validationMissing: 'Provide Account ID, R2 Access Key ID, and Secret Access Key to connect to Cloudflare R2.',
+      validationMissing: 'Provide Account ID, R2 Access Key ID, and Secret Access Key to connect to Cloudflare Server.',
       cancel: 'Cancel',
       apply: 'Apply Connection',
     },
@@ -986,6 +1025,9 @@ export const TRANSLATIONS: Record<AppLocale, TranslationCatalog> = {
         CLOUDFLARE_ENDPOINT_ERROR: 'Could not reach the Cloudflare R2 S3 endpoint.',
         UPLOAD_FILE_REQUIRED: 'Select or attach at least one file to upload.',
         NETWORK_UNREACHABLE: 'API connection failed. Verify that the server is reachable.',
+        LOCAL_FOLDER_INVALID: 'Invalid local folder path. Provide a valid directory path on the host.',
+        LOCAL_FOLDER_SYSTEM_RESTRICTED: 'Protected system directories cannot be used as a bucket storage root.',
+        LOCAL_FOLDER_UNREACHABLE: 'Could not access or write to the specified host folder.',
       },
       invalidJsonPrefix: 'Invalid JSON: {message}',
       invalidJsonGeneric: 'Invalid JSON.',

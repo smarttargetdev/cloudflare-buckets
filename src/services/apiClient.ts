@@ -9,6 +9,7 @@ import type {
   CreateBucketRequest,
   DirectoryEntry,
   DirectoryListing,
+  LocalFolderInspectResponse,
   LogSinkConfig,
   LogSinkId,
   ObjectPreviewResponse,
@@ -22,12 +23,14 @@ import type {
 
 export interface ApiConnectionConfig {
   mode: ConnectionMode;
+  localFolderPath: string;
   credentials: CloudflareCredentials;
 }
 
 class BucketsApiClient {
   private config: ApiConnectionConfig = {
     mode: 'sandbox',
+    localFolderPath: './data/buckets',
     credentials: {
       accountId: '',
       apiToken: '',
@@ -49,6 +52,9 @@ class BucketsApiClient {
       'x-buckets-mode': this.config.mode,
       ...extra,
     };
+    if (this.config.mode === 'local' && this.config.localFolderPath.trim()) {
+      headers['x-buckets-local-path'] = this.config.localFolderPath.trim();
+    }
     if (this.config.mode === 'cloudflare') {
       headers['x-cf-account-id'] = this.config.credentials.accountId;
       headers['x-cf-api-token'] = this.config.credentials.apiToken;
@@ -82,6 +88,21 @@ class BucketsApiClient {
       logClientError(context, parsed);
       throw parsed;
     }
+  }
+
+  public inspectLocalFolder(
+    folderPath: string,
+    createIfMissing = true,
+  ): Promise<LocalFolderInspectResponse> {
+    return this.request<LocalFolderInspectResponse>(
+      '/api/local-storage/inspect',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: folderPath, createIfMissing }),
+      },
+      'InspectLocalFolder',
+    );
   }
 
   public listBuckets(): Promise<BucketSummary[]> {
@@ -284,7 +305,12 @@ class BucketsApiClient {
   }
 
   public getDownloadUrl(bucket: string, key: string): string {
-    return `/api/buckets/${encodeURIComponent(bucket)}/objects/download?key=${encodeURIComponent(key)}`;
+    const params = new URLSearchParams({ key });
+    if (this.config.mode === 'local' && this.config.localFolderPath.trim()) {
+      params.set('mode', 'local');
+      params.set('localPath', this.config.localFolderPath.trim());
+    }
+    return `/api/buckets/${encodeURIComponent(bucket)}/objects/download?${params.toString()}`;
   }
 
   public getLogsExportUrl(
