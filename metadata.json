@@ -1,6 +1,6 @@
 {
   "name": "Cloudflare Buckets",
-  "description": "Cloudflare Buckets (Buckets) — Gerenciamento de buckets R2, diretórios hierárquicos, busca por metadados, operações em lote, telemetria centralizada, simulador Expo universal e monorepo .NET 10 + Wrangler IaC.",
+  "description": "Cross-platform React Native app with .NET Core backend for seamless Cloudflare R2 bucket and file management.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
