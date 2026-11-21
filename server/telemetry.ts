@@ -8,7 +8,7 @@ import type {
   PerformanceMetricsSnapshot,
   R2OperationName,
   StructuredLogEntry,
-} from '../source/shared/types';
+} from '../manager/shared/types';
 
 interface OpSample {
   durations: number[];

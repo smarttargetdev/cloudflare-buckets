@@ -10,7 +10,7 @@ import type {
   ConnectionMode,
   LogSinkId,
   R2OperationName,
-} from './source/shared/types';
+} from './manager/shared/types';
 
 const PORT = Number(process.env.PORT) || 3000;
 

@@ -99,10 +99,10 @@ flowchart TB
 
 | Camada | Responsabilidade |
 |---|---|
-| `source/App.tsx` | Estado global da sessão, navegação, tema, idioma e conexão ativa |
-| `source/components/` | Telas, formulários, tabelas, editores e visualizações |
-| `source/services/apiClient.ts` | Chamadas REST e cabeçalhos da conexão selecionada |
-| `source/shared/` | Tipos, i18n, tratamento de erros e utilitários do editor |
+| `manager/App.tsx` | Estado global da sessão, navegação, tema, idioma e conexão ativa |
+| `manager/components/` | Telas, formulários, tabelas, editores e visualizações |
+| `manager/services/apiClient.ts` | Chamadas REST e cabeçalhos da conexão selecionada |
+| `manager/shared/` | Tipos, i18n, tratamento de erros e utilitários do editor |
 | `server.ts` | Inicialização Express, rotas REST, upload multipart e middleware |
 | `server/r2Engine.ts` | Implementação uniforme de sandbox, pasta local e Cloudflare R2 |
 | `server/telemetry.ts` | Métricas, logs estruturados, custos e destinos de exportação |
@@ -340,7 +340,7 @@ Cada operação instrumentada recebe um `X-Trace-Id`, gera `Server-Timing` e reg
 │   ├── r2Engine.ts           # Sandbox, filesystem e Cloudflare R2
 │   ├── telemetry.ts          # Métricas, logs e sinks
 │   └── errors.ts             # Erros e resposta RFC 7807
-├── source/
+├── manager/
 │   ├── App.tsx               # Shell principal e navegação
 │   ├── components/           # Componentes React das áreas do app
 │   ├── services/apiClient.ts # Cliente HTTP tipado

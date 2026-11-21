@@ -5,7 +5,7 @@ import {
   formatBytes,
   normalizePrefix,
   parseApiError,
-} from '../source/shared/errorHandler';
+} from '../manager/shared/errorHandler';
 
 describe('Frontend Client Error Handler & Path Utilities', () => {
   it('maps RFC 7807 API error payloads to localized user guidance', () => {
