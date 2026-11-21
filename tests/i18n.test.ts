@@ -7,9 +7,9 @@ import {
   getTranslation,
   setActiveLocale,
   TRANSLATIONS,
-} from '../src/shared/i18n';
-import { parseApiError } from '../src/shared/errorHandler';
-import { validateSyntaxHint } from '../src/shared/codeEditorUtils';
+} from '../source/shared/i18n';
+import { parseApiError } from '../source/shared/errorHandler';
+import { validateSyntaxHint } from '../source/shared/codeEditorUtils';
 
 function collectLeafKeys(obj: Record<string, unknown>, prefix = ''): string[] {
   const keys: string[] = [];

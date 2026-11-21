@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AppApiError } from './errors';
-import { normalizePrefix } from '../src/shared/errorHandler';
+import { normalizePrefix } from '../source/shared/errorHandler';
 import type {
   BucketSummary,
   BulkDeleteRequest,
@@ -37,7 +37,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchResultItem,
-} from '../src/shared/types';
+} from '../source/shared/types';
 
 const LOCAL_META_FILENAME = '.buckets-meta.json';
 

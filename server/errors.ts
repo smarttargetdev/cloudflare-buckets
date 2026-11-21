@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import type { ApiErrorResponse, BulkItemFailure } from '../src/shared/types';
+import type { ApiErrorResponse, BulkItemFailure } from '../source/shared/types';
 
 export class AppApiError extends Error {
   public readonly status: number;

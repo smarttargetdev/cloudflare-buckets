@@ -7,12 +7,12 @@ import {
   parseMarkdownBlocks,
   tokenizeLine,
   validateSyntaxHint,
-} from '../src/shared/codeEditorUtils';
+} from '../source/shared/codeEditorUtils';
 import {
   getPrismLanguageKey,
   getPrismTokenClass,
   highlightCodeLinesWithPrism,
-} from '../src/shared/prismHighlighter';
+} from '../source/shared/prismHighlighter';
 
 describe('Code & Text Editor Language Detection, Formatting & Prism.js', () => {
   it('detects all required code and text file extensions including toml accurately', () => {
