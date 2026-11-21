@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, Search } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { formatBytes, type ParsedClientError } from '../shared/errorHandler';
@@ -8,9 +8,15 @@ import { ErrorBanner } from './ErrorBanner';
 interface GlobalSearchViewProps {
   onOpenLocation: (bucket: string, prefix: string) => void;
   connectionVersion: number;
+  focusSignal?: number;
 }
 
-export function GlobalSearchView({ onOpenLocation, connectionVersion }: GlobalSearchViewProps) {
+export function GlobalSearchView({
+  onOpenLocation,
+  connectionVersion,
+  focusSignal = 0,
+}: GlobalSearchViewProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [buckets, setBuckets] = useState<BucketSummary[]>([]);
   const [query, setQuery] = useState('');
   const [bucketFilter, setBucketFilter] = useState('');
@@ -19,6 +25,10 @@ export function GlobalSearchView({ onOpenLocation, connectionVersion }: GlobalSe
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ParsedClientError | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [focusSignal]);
 
   useEffect(() => {
     apiClient.listBuckets().then(setBuckets).catch(() => {});
@@ -65,6 +75,7 @@ export function GlobalSearchView({ onOpenLocation, connectionVersion }: GlobalSe
           <div className="md:col-span-4">
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Nome ou Chave</label>
             <input
+              ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { formatBytes, type ParsedClientError } from '../shared/errorHandler';
 import type {
@@ -8,12 +8,14 @@ import type {
   StructuredLogEntry,
 } from '../shared/types';
 import { ErrorBanner } from './ErrorBanner';
+import { TelemetryDashboard } from './TelemetryDashboard';
 
 export function TelemetryView() {
   const [metrics, setMetrics] = useState<PerformanceMetricsSnapshot | null>(null);
   const [logs, setLogs] = useState<StructuredLogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [searchLog, setSearchLog] = useState('');
+  const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ParsedClientError | null>(null);
 
@@ -38,7 +40,11 @@ export function TelemetryView() {
     loadData();
   }, [loadData]);
 
-  const handleToggleSink = async (id: LogSinkId, field: 'enabled' | 'workerForwardingEnabled', value: boolean) => {
+  const handleToggleSink = async (
+    id: LogSinkId,
+    field: 'enabled' | 'workerForwardingEnabled',
+    value: boolean,
+  ) => {
     setError(null);
     try {
       await apiClient.updateSink(id, { [field]: value });
@@ -46,6 +52,17 @@ export function TelemetryView() {
     } catch (err) {
       setError(err as ParsedClientError);
     }
+  };
+
+  const handleDownloadLogs = () => {
+    const url = apiClient.getLogsExportUrl(exportFormat, {
+      level: levelFilter,
+      q: searchLog.trim() || undefined,
+    });
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `buckets-session-logs.${exportFormat}`;
+    link.click();
   };
 
   return (
@@ -94,6 +111,9 @@ export function TelemetryView() {
           </div>
         </div>
       </section>
+
+      {/* Recharts R2 Bucket Storage, Request Counts & Egress Cost Dashboard */}
+      <TelemetryDashboard metrics={metrics} loading={loading} />
 
       {/* Centralized Logging Sinks (.NET Serilog + Cloudflare Workers) */}
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
@@ -205,13 +225,13 @@ export function TelemetryView() {
         </div>
       </section>
 
-      {/* Structured Logs Feed */}
+      {/* Structured Logs Feed + Download Logs (CSV/JSON) */}
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
             Stream de Logs Estruturados (TraceId &amp; Sinks)
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={levelFilter}
               onChange={(e) => setLevelFilter(e.target.value)}
@@ -229,6 +249,30 @@ export function TelemetryView() {
               placeholder="Filtrar TraceId, bucket ou mensagem..."
               className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
             />
+            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
+              {(['csv', 'json'] as const).map((fmt) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => setExportFormat(fmt)}
+                  className={`px-2.5 py-1 text-xs font-mono font-medium uppercase rounded-md transition-colors ${
+                    exportFormat === fmt
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  {fmt}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadLogs}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download Logs
+            </button>
           </div>
         </div>
 

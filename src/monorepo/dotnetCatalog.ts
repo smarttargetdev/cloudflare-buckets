@@ -244,6 +244,7 @@ public sealed record DirectoryListing(
 
 public sealed record CreateBucketRequest(string Name, string LocationHint = "ENAM", string StorageClass = "Standard");
 public sealed record CreateFolderRequest(string Prefix, bool CreateMarkerObject = true);
+public sealed record SaveObjectContentRequest(string Key, string Content, string ContentType = "text/plain", IReadOnlyDictionary<string, string>? Metadata = null);
 public sealed record SearchRequest(string? Query, string? Bucket, string? TagKey, string? TagValue, string? ContentType);
 public sealed record SearchResponse(SearchRequest Query, int TotalMatches, int BucketsScanned, long ElapsedMs, IReadOnlyList<R2ObjectItem> Results);
 
@@ -702,6 +703,14 @@ public sealed class BucketsController : ControllerBase
     [HttpPost("{bucket}/folders")]
     public Task<DirectoryEntry> CreateFolder(string bucket, [FromBody] CreateFolderRequest request, CancellationToken ct)
         => _storage.CreateFolderAsync(bucket, request.Prefix, request.CreateMarkerObject, ct);
+
+    [HttpPut("{bucket}/objects/content")]
+    public async Task<R2ObjectItem> PutObjectContent(string bucket, [FromBody] SaveObjectContentRequest request, CancellationToken ct)
+    {
+        await using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(request.Content));
+        var meta = request.Metadata is null ? new Dictionary<string, string>() : new Dictionary<string, string>(request.Metadata);
+        return await _storage.UploadObjectAsync(bucket, request.Key, stream, request.ContentType, meta, ct);
+    }
 }
 
 [ApiController]
@@ -719,6 +728,31 @@ public sealed class OperationsController : ControllerBase
 
     [HttpPost("objects/bulk-move")]
     public Task<BulkOperationResult> BulkMove([FromBody] BulkMoveRequest request, CancellationToken ct) => _storage.BulkMoveAsync(request, ct);
+}
+
+[ApiController]
+[Route("api/telemetry")]
+public sealed class TelemetryController : ControllerBase
+{
+    [HttpGet("metrics")]
+    public IActionResult GetMetrics() => Ok(new
+    {
+        uptimeSeconds = Environment.TickCount64 / 1000,
+        r2EgressRatePerGbUsd = 0.00m,
+        s3ComparisonEgressRatePerGbUsd = 0.09m
+    });
+
+    [HttpGet("logs/export")]
+    public IActionResult ExportLogs([FromQuery] string format = "json")
+    {
+        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+        if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
+        {
+            const string csv = "timestamp,level,operation,statusCode,durationMs,message\\n";
+            return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"buckets-logs-{stamp}.csv");
+        }
+        return File(System.Text.Encoding.UTF8.GetBytes("{\"logs\":[]}"), "application/json", $"buckets-logs-{stamp}.json");
+    }
 }
 `,
   },

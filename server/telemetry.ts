@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import type {
+  BucketSummary,
+  BucketTelemetrySummary,
   LogSinkConfig,
   LogSinkId,
   OperationMetricSummary,
@@ -12,6 +14,11 @@ interface OpSample {
   durations: number[];
   errorCount: number;
   totalBytes: number;
+}
+
+interface BucketUsageCounter {
+  requestCount: number;
+  egressBytes: number;
 }
 
 const ALL_OPERATIONS: R2OperationName[] = [
@@ -31,6 +38,7 @@ const ALL_OPERATIONS: R2OperationName[] = [
 export class BucketsTelemetry {
   private readonly startedAt = Date.now();
   private readonly samples = new Map<R2OperationName, OpSample>();
+  private readonly bucketUsage = new Map<string, BucketUsageCounter>();
   private readonly logs: StructuredLogEntry[] = [];
   private readonly maxLogs = 250;
   private sinks: LogSinkConfig[] = [
@@ -76,6 +84,10 @@ export class BucketsTelemetry {
   }
 
   private seedInitialTelemetry(): void {
+    this.bucketUsage.set('buckets-prod-assets', { requestCount: 1420, egressBytes: 428 * 1024 * 1024 });
+    this.bucketUsage.set('buckets-mobile-builds', { requestCount: 685, egressBytes: 1840 * 1024 * 1024 });
+    this.bucketUsage.set('buckets-edge-logs', { requestCount: 312, egressBytes: 96 * 1024 * 1024 });
+
     this.recordOperation({
       operation: 'ListBuckets',
       durationMs: 18,
@@ -176,6 +188,19 @@ export class BucketsTelemetry {
       sinks: this.getEnabledSinkIds(),
     };
 
+    if (input.bucket && input.bucket !== '*') {
+      const prev = this.bucketUsage.get(input.bucket) ?? { requestCount: 0, egressBytes: 0 };
+      prev.requestCount += 1;
+      if (
+        input.bytes &&
+        input.bytes > 0 &&
+        (input.operation === 'GetObject' || input.operation === 'ListObjectsV2' || input.operation === 'SearchObjects')
+      ) {
+        prev.egressBytes += input.bytes;
+      }
+      this.bucketUsage.set(input.bucket, prev);
+    }
+
     this.logs.unshift(entry);
     if (this.logs.length > this.maxLogs) {
       this.logs.length = this.maxLogs;
@@ -195,7 +220,79 @@ export class BucketsTelemetry {
     });
   }
 
-  public getMetricsSnapshot(): PerformanceMetricsSnapshot {
+  public exportLogs(
+    format: 'csv' | 'json',
+    filter?: { level?: string; operation?: string; q?: string },
+  ): { content: string; mimeType: string; extension: 'csv' | 'json' } {
+    const entries = this.getLogs(filter);
+    if (format === 'csv') {
+      const header = [
+        'id',
+        'timestamp',
+        'level',
+        'source',
+        'traceId',
+        'operation',
+        'statusCode',
+        'durationMs',
+        'bucket',
+        'objectKey',
+        'errorCode',
+        'sinks',
+        'message',
+      ].join(',');
+
+      const escapeCsv = (val: unknown): string => {
+        const str = String(val ?? '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const rows = entries.map((e) =>
+        [
+          e.id,
+          e.timestamp,
+          e.level,
+          e.source,
+          e.traceId,
+          e.operation,
+          e.statusCode,
+          e.durationMs,
+          e.bucket ?? '',
+          e.objectKey ?? '',
+          e.errorCode ?? '',
+          e.sinks.join('|'),
+          e.message,
+        ]
+          .map(escapeCsv)
+          .join(','),
+      );
+      return {
+        content: [header, ...rows].join('\n'),
+        mimeType: 'text/csv; charset=utf-8',
+        extension: 'csv',
+      };
+    }
+
+    return {
+      content: JSON.stringify(
+        {
+          exportedAt: new Date().toISOString(),
+          system: 'Cloudflare Buckets',
+          totalEntries: entries.length,
+          logs: entries,
+        },
+        null,
+        2,
+      ),
+      mimeType: 'application/json; charset=utf-8',
+      extension: 'json',
+    };
+  }
+
+  public getMetricsSnapshot(buckets: BucketSummary[] = []): PerformanceMetricsSnapshot {
     let totalRequests = 0;
     let totalErrors = 0;
     let totalBytesTransferred = 0;
@@ -236,6 +333,24 @@ export class BucketsTelemetry {
     const overallP95Ms =
       sortedAll.length > 0 ? sortedAll[Math.floor(0.95 * (sortedAll.length - 1))] : 0;
 
+    const bucketMetrics: BucketTelemetrySummary[] = buckets.map((b) => {
+      const usage = this.bucketUsage.get(b.name) ?? { requestCount: 0, egressBytes: 0 };
+      const storageGb = b.totalBytes / (1024 * 1024 * 1024);
+      const egressGb = usage.egressBytes / (1024 * 1024 * 1024);
+      return {
+        bucket: b.name,
+        storageBytes: b.totalBytes,
+        storageMb: Math.round((b.totalBytes / (1024 * 1024)) * 1000) / 1000,
+        objectCount: b.objectCount,
+        requestCount: usage.requestCount,
+        egressBytes: usage.egressBytes,
+        egressMb: Math.round((usage.egressBytes / (1024 * 1024)) * 100) / 100,
+        r2StorageCostUsd: Math.round(storageGb * 0.015 * 10000) / 10000,
+        r2EgressCostUsd: 0,
+        s3EquivalentEgressUsd: Math.round(egressGb * 0.09 * 100) / 100,
+      };
+    });
+
     return {
       uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
       totalRequests,
@@ -246,6 +361,7 @@ export class BucketsTelemetry {
       overallAvgMs,
       overallP95Ms,
       operations,
+      bucketMetrics,
       sinks: this.sinks,
       recentWorkerTimingHeader: `r2-op;dur=${overallAvgMs};desc="Cloudflare R2 Edge Proxy", api;dur=${overallP95Ms}`,
     };

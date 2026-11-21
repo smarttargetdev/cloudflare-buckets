@@ -3,6 +3,7 @@ import {
   Activity,
   Code2,
   Database,
+  FileCode2,
   KeyRound,
   Moon,
   Search,
@@ -11,6 +12,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { BucketsExplorer } from './components/BucketsExplorer';
+import { CodeEditorWorkspace, type EditorTarget } from './components/CodeEditorWorkspace';
 import { ConnectionDrawer } from './components/ConnectionDrawer';
 import { ExpoSimulatorView } from './components/ExpoSimulatorView';
 import { GlobalSearchView } from './components/GlobalSearchView';
@@ -19,15 +21,21 @@ import { TelemetryView } from './components/TelemetryView';
 import { WranglerStudioView } from './components/WranglerStudioView';
 import { apiClient, type ApiConnectionConfig } from './services/apiClient';
 
-type ActiveTab = 'buckets' | 'search' | 'telemetry' | 'expo' | 'wrangler' | 'monorepo';
+type ActiveTab = 'buckets' | 'editor' | 'search' | 'telemetry' | 'expo' | 'wrangler' | 'monorepo';
 
-const NAV_ITEMS: Array<{ id: ActiveTab; label: string; icon: typeof Database }> = [
-  { id: 'buckets', label: 'Buckets & Pastas', icon: Database },
-  { id: 'search', label: 'Busca Global', icon: Search },
-  { id: 'telemetry', label: 'Telemetria & Logs', icon: Activity },
-  { id: 'expo', label: 'Expo Universal', icon: Smartphone },
-  { id: 'wrangler', label: 'Wrangler IaC', icon: TerminalSquare },
-  { id: 'monorepo', label: 'Monorepo & Testes', icon: Code2 },
+const NAV_ITEMS: Array<{
+  id: ActiveTab;
+  label: string;
+  shortcut: string;
+  icon: typeof Database;
+}> = [
+  { id: 'buckets', label: 'Buckets & Pastas', shortcut: 'Ctrl+B', icon: Database },
+  { id: 'editor', label: 'Editor de Código', shortcut: 'Alt+C', icon: FileCode2 },
+  { id: 'search', label: 'Busca Global', shortcut: 'Ctrl+K', icon: Search },
+  { id: 'telemetry', label: 'Telemetria & Logs', shortcut: 'Alt+T', icon: Activity },
+  { id: 'expo', label: 'Expo Universal', shortcut: 'Alt+E', icon: Smartphone },
+  { id: 'wrangler', label: 'Wrangler IaC', shortcut: 'Alt+W', icon: TerminalSquare },
+  { id: 'monorepo', label: 'Monorepo & Testes', shortcut: 'Alt+M', icon: Code2 },
 ];
 
 export default function App() {
@@ -35,7 +43,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('buckets');
   const [selectedBucket, setSelectedBucket] = useState('buckets-prod-assets');
   const [currentPrefix, setCurrentPrefix] = useState('');
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchFocusSignal, setSearchFocusSignal] = useState(0);
   const [connectionConfig, setConnectionConfig] = useState<ApiConnectionConfig>(
     apiClient.getConnectionConfig(),
   );
@@ -45,6 +55,56 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isEditingText =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === 'k') {
+        e.preventDefault();
+        setActiveTab('search');
+        setSearchFocusSignal((n) => n + 1);
+        return;
+      }
+
+      if (mod && key === 'b') {
+        e.preventDefault();
+        setActiveTab('buckets');
+        return;
+      }
+
+      if (isEditingText) return;
+
+      if (e.altKey && key === 'c') {
+        e.preventDefault();
+        setActiveTab('editor');
+      } else if (e.altKey && key === 't') {
+        e.preventDefault();
+        setActiveTab('telemetry');
+      } else if (e.altKey && key === 'e') {
+        e.preventDefault();
+        setActiveTab('expo');
+      } else if (e.altKey && key === 'w') {
+        e.preventDefault();
+        setActiveTab('wrangler');
+      } else if (e.altKey && key === 'm') {
+        e.preventDefault();
+        setActiveTab('monorepo');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleSaveConnection = (next: ApiConnectionConfig) => {
     apiClient.setConnectionConfig(next);
@@ -56,6 +116,11 @@ export default function App() {
     setSelectedBucket(bucket);
     setCurrentPrefix(prefix);
     setActiveTab('buckets');
+  };
+
+  const handleOpenEditor = (bucket: string, key: string, isNew: boolean) => {
+    setEditorTarget({ bucket, key, isNew, nonce: Date.now() });
+    setActiveTab('editor');
   };
 
   return (
@@ -121,15 +186,25 @@ export default function App() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    if (item.id === 'search') {
+                      setSearchFocusSignal((n) => n + 1);
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
                     active
                       ? 'bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400'
                       : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                   }`}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{item.label}</span>
+                  <span className="flex items-center gap-2.5">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.label}</span>
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-400 dark:text-slate-500">
+                    {item.shortcut}
+                  </span>
                 </button>
               );
             })}
@@ -139,11 +214,10 @@ export default function App() {
             <div className="font-medium text-slate-700 dark:text-slate-300">
               Buckets · {connectionConfig.mode === 'cloudflare' ? 'Cloudflare R2' : 'Sandbox Local'}
             </div>
-            <div>.NET 10 · Expo Universal · Wrangler</div>
+            <div>Ctrl+B Buckets · Ctrl+K Busca · Alt+C Editor</div>
           </div>
         </aside>
 
-        {/* Mobile Tab Selector */}
         <main className="flex-1 min-w-0 p-4 md:p-6 overflow-y-auto">
           <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
             {NAV_ITEMS.map((item) => (
@@ -169,13 +243,22 @@ export default function App() {
                 currentPrefix={currentPrefix}
                 onSelectBucket={setSelectedBucket}
                 onChangePrefix={setCurrentPrefix}
+                onOpenEditor={handleOpenEditor}
                 connectionVersion={connectionVersion}
+              />
+            )}
+            {activeTab === 'editor' && (
+              <CodeEditorWorkspace
+                target={editorTarget}
+                connectionVersion={connectionVersion}
+                onSaved={() => setConnectionVersion((v) => v + 1)}
               />
             )}
             {activeTab === 'search' && (
               <GlobalSearchView
                 onOpenLocation={handleJumpFromSearch}
                 connectionVersion={connectionVersion}
+                focusSignal={searchFocusSignal}
               />
             )}
             {activeTab === 'telemetry' && <TelemetryView />}

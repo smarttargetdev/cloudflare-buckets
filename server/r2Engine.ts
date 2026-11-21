@@ -1117,11 +1117,12 @@ function isTextMime(contentType: string, key: string): boolean {
     contentType.startsWith('text/') ||
     contentType.includes('json') ||
     contentType.includes('xml') ||
+    contentType.includes('yaml') ||
     contentType.includes('toml') ||
     contentType.includes('javascript') ||
     contentType.includes('ndjson')
   ) {
     return true;
   }
-  return /\.(md|txt|json|toml|yml|yaml|cs|ts|tsx|js|sh|xml|csv|log|ndjson)$/i.test(key);
+  return /\.(md|txt|json|toml|yml|yaml|cs|ts|tsx|js|jsx|htm|html|css|sh|xml|csv|log|ndjson)$/i.test(key);
 }

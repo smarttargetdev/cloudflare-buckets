@@ -62,6 +62,13 @@ export interface CreateFolderRequest {
   createMarkerObject: boolean;
 }
 
+export interface SaveObjectContentRequest {
+  key: string;
+  content: string;
+  contentType?: string;
+  metadata?: Record<string, string>;
+}
+
 export interface SearchRequest {
   query?: string;
   bucket?: string;
@@ -193,6 +200,19 @@ export interface StructuredLogEntry {
   sinks: LogSinkId[];
 }
 
+export interface BucketTelemetrySummary {
+  bucket: string;
+  storageBytes: number;
+  storageMb: number;
+  objectCount: number;
+  requestCount: number;
+  egressBytes: number;
+  egressMb: number;
+  r2StorageCostUsd: number;
+  r2EgressCostUsd: number;
+  s3EquivalentEgressUsd: number;
+}
+
 export interface PerformanceMetricsSnapshot {
   uptimeSeconds: number;
   totalRequests: number;
@@ -202,6 +222,7 @@ export interface PerformanceMetricsSnapshot {
   overallAvgMs: number;
   overallP95Ms: number;
   operations: OperationMetricSummary[];
+  bucketMetrics: BucketTelemetrySummary[];
   sinks: LogSinkConfig[];
   recentWorkerTimingHeader: string;
 }

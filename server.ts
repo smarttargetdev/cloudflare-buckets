@@ -236,6 +236,43 @@ async function startServer() {
     }
   });
 
+  app.put('/api/buckets/:bucket/objects/content', async (req, res, next) => {
+    try {
+      const { mode, creds } = extractConnectionContext(req);
+      const bucketName = req.params.bucket;
+      const { key, content = '', contentType = 'text/plain', metadata = {} } = req.body ?? {};
+      if (typeof key !== 'string' || !key.trim()) {
+        throw new AppApiError({
+          status: 400,
+          errorCode: 'OBJECT_KEY_INVALID',
+          title: 'Invalid Object Key',
+          detail: 'Provide a valid object key (e.g. "scripts/worker.ts").',
+        });
+      }
+      const buffer = Buffer.from(String(content), 'utf-8');
+      await instrument(req, res, 'PutObject', async () => {
+        const saved = await engine.putObject(
+          bucketName,
+          key.trim(),
+          buffer,
+          contentType,
+          metadata,
+          mode,
+          creds,
+        );
+        return {
+          payload: saved,
+          bucket: bucketName,
+          objectKey: saved.key,
+          bytes: saved.size,
+          message: `Saved text/code file "${saved.key}" (${saved.size} bytes) to "${bucketName}".`,
+        };
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get('/api/buckets/:bucket/objects/preview', async (req, res, next) => {
     try {
       const { mode, creds } = extractConnectionContext(req);
@@ -358,8 +395,14 @@ async function startServer() {
     }
   });
 
-  app.get('/api/telemetry/metrics', (_req, res) => {
-    res.json(telemetry.getMetricsSnapshot());
+  app.get('/api/telemetry/metrics', async (req, res, next) => {
+    try {
+      const { mode, creds } = extractConnectionContext(req);
+      const buckets = await engine.listBuckets(mode, creds).catch(() => []);
+      res.json(telemetry.getMetricsSnapshot(buckets));
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.get('/api/telemetry/logs', (req, res) => {
@@ -367,6 +410,19 @@ async function startServer() {
     const operation = typeof req.query.operation === 'string' ? req.query.operation : undefined;
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     res.json(telemetry.getLogs({ level, operation, q }));
+  });
+
+  app.get('/api/telemetry/logs/export', (req, res) => {
+    const rawFormat = typeof req.query.format === 'string' ? req.query.format.toLowerCase() : 'json';
+    const format = rawFormat === 'csv' ? 'csv' : 'json';
+    const level = typeof req.query.level === 'string' ? req.query.level : undefined;
+    const operation = typeof req.query.operation === 'string' ? req.query.operation : undefined;
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+
+    const exported = telemetry.exportLogs(format, { level, operation, q });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    res.setHeader('Content-Disposition', `attachment; filename="buckets-session-logs-${stamp}.${exported.extension}"`);
+    res.type(exported.mimeType).send(exported.content);
   });
 
   app.post('/api/telemetry/sinks', (req, res) => {

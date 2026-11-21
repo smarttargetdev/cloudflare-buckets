@@ -173,6 +173,21 @@ class BucketsApiClient {
     );
   }
 
+  public saveObjectContent(
+    bucket: string,
+    body: { key: string; content: string; contentType?: string; metadata?: Record<string, string> },
+  ): Promise<R2ObjectItem> {
+    return this.request<R2ObjectItem>(
+      `/api/buckets/${encodeURIComponent(bucket)}/objects/content`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'SaveObjectContent',
+    );
+  }
+
   public presignObject(
     bucket: string,
     key: string,
@@ -252,6 +267,17 @@ class BucketsApiClient {
 
   public getDownloadUrl(bucket: string, key: string): string {
     return `/api/buckets/${encodeURIComponent(bucket)}/objects/download?key=${encodeURIComponent(key)}`;
+  }
+
+  public getLogsExportUrl(
+    format: 'csv' | 'json',
+    filter?: { level?: string; operation?: string; q?: string },
+  ): string {
+    const params = new URLSearchParams({ format });
+    if (filter?.level) params.set('level', filter.level);
+    if (filter?.operation) params.set('operation', filter.operation);
+    if (filter?.q) params.set('q', filter.q);
+    return `/api/telemetry/logs/export?${params.toString()}`;
   }
 }
 
