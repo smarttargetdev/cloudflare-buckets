@@ -9,7 +9,7 @@
     "start": "node server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf build server.js",
+    "clean": "rm -rf build distributions server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },

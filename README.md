@@ -388,7 +388,7 @@ GEMINI_API_KEY=
 ```
 
 - `PORT`: porta HTTP, padrão `3000`;
-- `NODE_ENV`: em `production`, serve `dist/`; nos demais modos, ativa o middleware Vite;
+- `NODE_ENV`: em `production`, serve `distributions/`; nos demais modos, ativa o middleware Vite;
 - `BUCKETS_LOCAL_FOLDER`: caminho padrão usado pelo modo pasta local;
 - `GEMINI_API_KEY`: reservado ao uso de recursos server-side de IA.
 
@@ -427,7 +427,7 @@ npm run build
 NODE_ENV=production npm start
 ```
 
-O comando `build` gera a SPA em `dist/`. `npm start` executa `server.ts` diretamente e, em produção, serve os arquivos estáticos.
+O comando `build` gera a SPA em `distributions/`. `npm start` executa `server.ts` diretamente e, em produção, serve os arquivos estáticos.
 
 ### Outros scripts
 
@@ -439,7 +439,7 @@ O comando `build` gera a SPA em `dist/`. `npm start` executa `server.ts` diretam
 | `npm run preview` | Pré-visualizar build pelo Vite |
 | `npm run lint` | Verificação TypeScript sem emissão |
 | `npm test` | Executar testes automatizados |
-| `npm run clean` | Remover `dist/` e `server.js` |
+| `npm run clean` | Remover `build/`, `distributions/` e `server.js` |
 
 ## Testes e validação
 

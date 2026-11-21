@@ -6,10 +6,13 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    build: {
+      outDir: 'distributions',
+    },
     plugins: [
       react(),
       tailwindcss(),
-      // Copies source/assets into dist/ so root-relative URLs like
+      // Copies source/assets into distributions/ so root-relative URLs like
       // "/source/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.
       {
@@ -19,7 +22,7 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
+          const distDir = path.resolve(__dirname, 'distributions');
           const srcAssets = path.resolve(__dirname, 'source/assets');
           const distAssets = path.resolve(distDir, 'source/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
