@@ -19,7 +19,7 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dists);
+          const distDir = path.resolve(__dirname, 'dist');
           const srcAssets = path.resolve(__dirname, 'manager/assets');
           const distAssets = path.resolve(distDir, 'assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
