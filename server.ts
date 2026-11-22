@@ -491,7 +491,7 @@ async function startServer() {
     res.json(updated);
   });
 
-  app.use('/api/*', (req, _res, next) => {
+  app.use('/api/*route', (req, _res, next) => {
     next(
       new AppApiError({
         status: 404,
